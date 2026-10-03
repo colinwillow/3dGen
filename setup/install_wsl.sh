@@ -2,7 +2,7 @@
 # One-time install, run INSIDE the Ubuntu (WSL2) terminal from the repo root:
 #     bash setup/install_wsl.sh
 # Safe to re-run: every step skips what is already there.
-set -euo pipefail
+set -eo pipefail   # no -u: conda's compiler activate scripts read unset variables
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 THIRD="$ROOT/third_party"
 mkdir -p "$THIRD"
