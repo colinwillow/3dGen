@@ -30,7 +30,7 @@ These models' CUDA extensions are much easier to build on Linux, so this runs in
 
 1. Update the NVIDIA driver on **Windows** (GeForce app or nvidia.com). Do not install a
    driver inside Ubuntu.
-2. In PowerShell (as admin): `wsl --install -d Ubuntu-22.04`, then reboot and pick a username.
+2. In PowerShell (as admin): `wsl --update`, then `wsl --install -d Ubuntu` (any Ubuntu from `wsl --list --online` works). Reboot if asked, then open **Ubuntu** from the Start menu and pick a username.
 3. In the Ubuntu terminal, clone into your Linux home (clones under `/mnt/c` are much slower)
    and run the installer:
    ```bash
