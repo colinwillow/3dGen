@@ -25,7 +25,7 @@ def blender():
 
 
 def retopo(high, out, name, a):
-    cmd = [blender(), "--background", "--factory-startup", "--python", str(HERE / "retopo.py"), "--",
+    cmd = [blender(), "--background", "--factory-startup", "--python-exit-code", "1", "--python", str(HERE / "retopo.py"), "--",
            "--high", str(high), "--out", str(out), "--name", name, "--faces", str(a.faces),
            "--tex", str(a.tex), "--voxel", str(a.voxel)]
     if a.tris:

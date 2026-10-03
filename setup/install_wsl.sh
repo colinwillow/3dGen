@@ -80,7 +80,9 @@ for v in 4.2.9 4.2.3 4.2.0; do
 done
 if [ -z "$BL_EXE" ]; then
   echo "  falling back to Ubuntu's blender package"
-  sudo apt-get install -y blender
+  # Ubuntu's Blender runs on the system Python, which has no numpy -- and Blender's
+  # glTF importer needs it.
+  sudo apt-get install -y blender python3-numpy
   BL_EXE="$(command -v blender)"
 fi
 [ -n "$BL_EXE" ] || { echo "Could not install Blender."; exit 1; }

@@ -296,7 +296,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Blender exits 0 even when the script it ran threw, so a crash here would look
+    # like success to the caller. Report it with a real exit code.
+    try:
+        main()
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        os._exit(1)
     # Everything is written by now. Blender can segfault while tearing itself
     # down after glTF exports, which would turn a finished job into a failed
     # one -- so skip the teardown entirely.
