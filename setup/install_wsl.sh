@@ -33,6 +33,22 @@ pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorc
 export CUDA_HOME="$CONDA_PREFIX"
 export TORCH_CUDA_ARCH_LIST="8.6"   # RTX 3090
 
+echo "== host compiler for CUDA 12.4 (needs gcc <= 13) =="
+# New Ubuntu ships gcc 14/15, which nvcc 12.4 refuses outright. Use gcc 13 from
+# apt if this release has it, otherwise gcc 12 from conda-forge inside the env.
+SYS_GCC="$(gcc -dumpversion | cut -d. -f1)"
+if [ "$SYS_GCC" -le 13 ]; then
+  CCX=gcc; CXXX=g++
+elif sudo apt-get install -y gcc-13 g++-13 >/dev/null 2>&1; then
+  CCX=gcc-13; CXXX=g++-13
+else
+  conda install -y -c conda-forge "gcc_linux-64=12" "gxx_linux-64=12"
+  CCX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc"; CXXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++"
+fi
+export CC="$(command -v "$CCX")" CXX="$(command -v "$CXXX")"
+export NVCC_PREPEND_FLAGS="-ccbin $CXX"   # nvcc honours this whatever torch passes
+echo "  using $("$CXX" --version | head -1)"
+
 echo "== Hunyuan3D-2 =="
 [ -d "$THIRD/Hunyuan3D-2" ] || git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2 "$THIRD/Hunyuan3D-2"
 cd "$THIRD/Hunyuan3D-2"
