@@ -17,15 +17,24 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
-def blender():
+def blender_cmd():
+    """How to run retopo.py. Preferred: Blender's own Python module (bpy 4.2) in its
+    own env, named by GEN3D_BPY -- the official build, and the path every test of
+    the retopo stage ran on. A distro Blender is the fallback: Ubuntu's 5.0 package is
+    built against a Python Blender doesn't support and its add-on operators lose
+    their settings (the FBX exporter crashes on its own options)."""
+    py = os.environ.get("GEN3D_BPY")
+    if py:
+        return [py, str(HERE / "retopo.py")]
     exe = os.environ.get("BLENDER") or shutil.which("blender")
     if not exe:
-        sys.exit("Blender not found: set BLENDER=/path/to/blender (setup/install_wsl.sh does)")
-    return exe
+        sys.exit("Blender not found: run setup/install_wsl.sh (it sets GEN3D_BPY)")
+    return [exe, "--background", "--factory-startup", "--python-exit-code", "1",
+            "--python", str(HERE / "retopo.py"), "--"]
 
 
 def retopo(high, out, name, a):
-    cmd = [blender(), "--background", "--factory-startup", "--python-exit-code", "1", "--python", str(HERE / "retopo.py"), "--",
+    cmd = blender_cmd() + [
            "--high", str(high), "--out", str(out), "--name", name, "--faces", str(a.faces),
            "--tex", str(a.tex), "--voxel", str(a.voxel)]
     if a.tris:

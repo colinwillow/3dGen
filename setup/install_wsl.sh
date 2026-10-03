@@ -62,37 +62,19 @@ rm -rf hy3dgen/texgen/custom_rasterizer/build hy3dgen/texgen/differentiable_rend
 cd "$ROOT"
 pip install -r requirements.txt
 
-echo "== Blender 4.2 LTS (headless: remesh, UV, bake, FBX) =="
-# Tries a few 4.2 LTS builds (download.blender.org only keeps some), then falls
-# back to Ubuntu's own Blender. Loud on purpose: a silent failed download here
-# used to end the installer with no message at all.
-BL_EXE=""
-for v in 4.2.9 4.2.3 4.2.0; do
-  d="$THIRD/blender-$v-linux-x64"
-  if [ -x "$d/blender" ]; then BL_EXE="$d/blender"; break; fi
-  echo "  downloading Blender $v ..."
-  if wget -q --show-progress -O /tmp/bl.tar.xz \
-       "https://download.blender.org/release/Blender4.2/blender-$v-linux-x64.tar.xz"; then
-    tar -xf /tmp/bl.tar.xz -C "$THIRD" && rm -f /tmp/bl.tar.xz
-    [ -x "$d/blender" ] && { BL_EXE="$d/blender"; break; }
-  fi
-  echo "  Blender $v not available, trying the next one"
-done
-if [ -z "$BL_EXE" ]; then
-  echo "  falling back to Ubuntu's blender package"
-  # Ubuntu's Blender runs on the system Python, which has no numpy -- and Blender's
-  # glTF importer needs it.
-  sudo apt-get install -y blender python3-numpy
-  BL_EXE="$(command -v blender)"
-fi
-[ -n "$BL_EXE" ] || { echo "Could not install Blender."; exit 1; }
-"$BL_EXE" --version | head -1
-BL="$(dirname "$BL_EXE")"
+echo "== Blender 4.2 as a Python module (remesh, UV, bake, FBX) =="
+# The official bpy 4.2 wheel in its own Python 3.11 env. Not a distro Blender:
+# Ubuntu's Blender 5.0 package is built against a Python Blender doesn't support,
+# and its add-on operators (the FBX exporter among them) lose all their settings.
+BPY_ENV="$HOME/miniforge3/envs/gen3d-bpy"
+[ -x "$BPY_ENV/bin/python" ] || conda create -y -n gen3d-bpy python=3.11
+"$BPY_ENV/bin/pip" install "bpy==4.2.0"
+"$BPY_ENV/bin/python" -c "import bpy; print('  bpy', bpy.app.version_string)"
 
 # Activation hook so `conda activate gen3d` always sets these.
 mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
 cat > "$CONDA_PREFIX/etc/conda/activate.d/gen3d.sh" <<EOF
-export BLENDER="$BL/blender"
+export GEN3D_BPY="$BPY_ENV/bin/python"
 export CUDA_HOME="\$CONDA_PREFIX"
 export PYTHONPATH="$ROOT:\${PYTHONPATH:-}"
 EOF
