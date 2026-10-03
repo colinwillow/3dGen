@@ -63,12 +63,18 @@ def reduce(mesh, faces):
     return mesh.simplify_quadric_decimation(face_count=faces)
 
 def generate(front, out_dir, left=None, back=None, right=None, texture=True,
-             steps=50, octree=384, seed=1234, paint_faces=60000, turbo=False):
+             steps=50, octree=None, seed=1234, paint_faces=100000, turbo=False, faces=None):
+    """Returns (textured, dense). `dense` is the model at `faces` when that is more than
+    the painting can take; the caller bakes the painted texture onto it. Otherwise None
+    and `textured` already is the model at `faces`."""
     from hy3dgen.rembg import BackgroundRemover
     from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if octree is None:
+        # Finer sampling only when the count asked for needs it: it costs time and VRAM.
+        octree = 512 if (faces or 0) > 500_000 else 384
     rembg = BackgroundRemover()
     views = {k: v for k, v in dict(front=front, left=left, back=back, right=right).items() if v}
     multi = len(views) > 1
@@ -79,7 +85,7 @@ def generate(front, out_dir, left=None, back=None, right=None, texture=True,
     else:
         repo, sub = "tencent/Hunyuan3D-2", "hunyuan3d-dit-v2-0" + ("-turbo" if turbo else "")
         image = _rgba(front, rembg)
-    print(f"[shape] {repo}/{sub}, views: {', '.join(views)}")
+    print(f"[shape] {repo}/{sub}, views: {', '.join(views)}, octree {octree}")
 
     pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(repo, subfolder=sub, use_safetensors=True)
     if turbo:
@@ -90,20 +96,32 @@ def generate(front, out_dir, left=None, back=None, right=None, texture=True,
     _free(pipe)
 
     mesh = clean(mesh)
+    raw = len(mesh.faces)
     mesh.export(out / "shape.glb")
-    print(f"[shape] {len(mesh.faces)} faces -> {out / 'shape.glb'}")
-    if not texture:
-        return out / "shape.glb"
+    print(f"[shape] {raw} faces -> {out / 'shape.glb'}")
 
-    # Paint works on the high-poly; the retopo stage bakes it onto the quads
-    # afterwards. Painting a mesh this dense is slow, so it is reduced first --
-    # still far denser than the low-poly it will be baked onto.
+    # The face count asked for. More than the AI made cannot be honoured -- subdividing
+    # would add faces and no detail -- so it is capped at what is there, and said so.
+    target = raw if not faces else min(faces, raw)
+    if faces and faces > raw:
+        print(f"[shape] asked for {faces} faces; the AI made {raw}, so you get all {raw}")
+    model = reduce(mesh.copy(), target) if target < raw else mesh
+    print(f"[shape] model at {len(model.faces)} faces")
+    if not texture:
+        model.export(out / "model.glb")
+        return out / "model.glb", None
+
+    # Painting is slow on dense meshes, so it runs on a reduced copy. Past that size the
+    # paint is baked onto the dense model afterwards, in Blender.
     from hy3dgen.texgen import Hunyuan3DPaintPipeline
-    mesh = reduce(mesh, paint_faces)
+    pmesh = model if len(model.faces) <= paint_faces else reduce(model.copy(), paint_faces)
     paint = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")
     front_img = image["front"] if multi else image
-    mesh = paint(mesh, image=front_img)
+    pmesh = paint(pmesh, image=front_img)
     _free(paint)
-    mesh.export(out / "textured.glb")
-    print(f"[shape] textured -> {out / 'textured.glb'}")
-    return out / "textured.glb"
+    pmesh.export(out / "textured.glb")
+    print(f"[shape] textured {len(pmesh.faces)} faces -> {out / 'textured.glb'}")
+    if len(model.faces) > len(pmesh.faces):
+        model.export(out / "dense.glb")
+        return out / "textured.glb", out / "dense.glb"
+    return out / "textured.glb", None

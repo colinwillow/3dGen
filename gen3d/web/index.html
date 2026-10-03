@@ -42,6 +42,8 @@
   .chips button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:4px 0;
     cursor:pointer;color:var(--dim);font-size:12px}
   .chips button:hover{color:var(--text)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .polyval{font-variant-numeric:tabular-nums;min-width:64px;text-align:right;font-weight:600}
   .check{display:flex;gap:8px;align-items:center;color:var(--text);cursor:pointer}
   .check small{color:var(--dim)}
   .go{background:var(--accent2);color:#04281b;border:0;border-radius:var(--r);padding:12px;font-weight:700;
@@ -121,6 +123,15 @@
         <label class="h">Output</label>
         <div class="seg" id="outSeg"><button data-v="high" class="on">High-poly</button><button data-v="retopo">Quad retopo</button></div>
         <div class="muted" id="outNote" style="margin-top:6px">The AI's textured model as it comes out -- for you to retopo.</div>
+      </div>
+      <div id="polyRow">
+        <label class="h">Polygons</label>
+        <div class="row"><input type="range" id="polySlide" min="0" max="1000" value="0"><span class="polyval" id="polyVal"></span></div>
+        <div class="chips" id="polyChips">
+          <button data-p="50000">50k</button><button data-p="100000">100k</button><button data-p="300000">300k</button>
+          <button data-p="1000000">1M</button><button data-p="2000000">2M</button>
+        </div>
+        <div class="muted" id="polyNote" style="margin-top:6px"></div>
       </div>
       <div id="retopoOpts">
       <div>
@@ -230,11 +241,28 @@ function syncOpts() {
   // always for "Retopo a mesh", by choice for a photo.
   $("#outRow").hidden = src !== "photo";
   $("#retopoOpts").hidden = src === "photo" && out === "high";
+  $("#polyRow").hidden = !(src === "photo" && out === "high");
   $("#outNote").textContent = out === "high"
     ? "The AI's textured model as it comes out -- for you to retopo."
     : "Plus an automatic quad retopo (QuadriFlow): even grid, no artist edge loops.";
 }
 syncOpts();
+// Polygon slider: log scale, 10k .. 2M (Tripo's high-poly ceiling).
+const PMIN = 10000, PMAX = 2000000;
+const toPolys = v => { const p = PMIN * Math.pow(PMAX / PMIN, v / 1000); return p < 100000 ? Math.round(p / 1000) * 1000 : Math.round(p / 10000) * 10000; };
+const toSlide = p => Math.round(1000 * Math.log(p / PMIN) / Math.log(PMAX / PMIN));
+const fmtP = p => p >= 1e6 ? (p / 1e6).toFixed(p % 1e6 ? 2 : 0).replace(/\.?0+$/, "") + "M" : Math.round(p / 1000) + "k";
+let polys = 100000;
+function setPolys(p) {
+  polys = Math.max(PMIN, Math.min(PMAX, p));
+  $("#polySlide").value = toSlide(polys); $("#polyVal").textContent = fmtP(polys);
+  $("#polyNote").textContent = polys <= 100000 ? "Painted directly by the AI."
+    : polys <= 500000 ? "Texture is baked onto the denser mesh. Adds a minute or two."
+    : "Finer shape pass, then the texture is baked on (4K above 1M). Several minutes. Capped at what the AI actually makes.";
+}
+$("#polySlide").oninput = e => setPolys(toPolys(+e.target.value));
+$("#polyChips").onclick = e => { const p = e.target.dataset.p; if (p) setPolys(+p); };
+setPolys(polys);
 $("#faceChips").onclick = e => { const f = e.target.dataset.f; if (f) $("#faces").value = f; };
 function validate() { $("#go").disabled = !(src === "photo" ? files.front : files.mesh); }
 
@@ -248,6 +276,7 @@ $("#go").onclick = async () => {
   fd.append("tex", $("#tex").value);
   fd.append("turbo", $("#turbo").checked);
   fd.append("retopo", src === "photo" && out === "retopo");
+  fd.append("polys", polys);
   $("#go").disabled = true;
   const r = await fetch("/api/jobs", { method: "POST", body: fd });
   validate();
@@ -320,7 +349,7 @@ $("#modes").onclick = e => { const m = e.target.dataset.m; if (m) { mode = m; ap
 // ---------- jobs ----------
 const STEPS_MAKE = [["shape", "Shape"], ["texture", "Texture"], ["quads", "Quads"], ["bake", "Bake"], ["export", "Export"]];
 const STEPS_RETOPO = STEPS_MAKE.slice(2);
-const STEPS_HIGH = [["shape", "Shape"], ["texture", "Texture"], ["export", "Export"]];
+const STEPS_HIGH = [["shape", "Shape"], ["texture", "Texture"], ["bake", "Bake"], ["export", "Export"]];
 const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? "just now" : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t * 1000).toLocaleDateString(); };
 const mmss = s => `${s / 60 | 0}:${String(s % 60 | 0).padStart(2, "0")}`;
 

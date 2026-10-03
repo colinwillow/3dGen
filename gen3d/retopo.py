@@ -28,7 +28,8 @@ def parse():
     ap.add_argument("--high", required=True, help="glb / gltf / fbx / obj")
     ap.add_argument("--out", required=True, help="output folder")
     ap.add_argument("--name", default="model")
-    ap.add_argument("--mode", choices=["retopo", "clean"], default="retopo")
+    ap.add_argument("--mode", choices=["retopo", "clean", "transfer"], default="retopo")
+    ap.add_argument("--dense", help="transfer mode: the mesh to bake --high's texture onto")
     ap.add_argument("--faces", type=int, default=5000, help="target face count")
     ap.add_argument("--tris", action="store_true", help="decimate to triangles instead of quads")
     ap.add_argument("--tex", type=int, default=2048, help="baked texture size")
@@ -57,6 +58,22 @@ def import_any(path):
     if not meshes:
         raise SystemExit("no mesh in " + path)
     return meshes
+
+
+def fix_materials(objs):
+    """glTF says a material that gives no metallic value is fully METALLIC -- and the
+    trimesh exporter the AI's output goes through leaves it out. A metal has no diffuse
+    colour, so it bakes black and shows up in C4D/Blender as dark chrome. The AI paints
+    colour only, so anything without a real metallic map is set to 0."""
+    for o in objs:
+        for m in (o.data.materials if o.type == "MESH" else []):
+            if not (m and m.use_nodes):
+                continue
+            for n in m.node_tree.nodes:
+                if n.type == "BSDF_PRINCIPLED" and not n.inputs["Metallic"].is_linked \
+                        and n.inputs["Metallic"].default_value > 0.5:
+                    n.inputs["Metallic"].default_value = 0.0
+                    log(f"material {m.name}: metallic 1 -> 0 (the file left it unset)")
 
 
 def only(obj):
@@ -172,6 +189,9 @@ def unwrap(low):
     only(low)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
+    # A mesh stored as loose triangles (many exporters do this) unwraps into one island
+    # per face, packed so small the bake has almost nowhere to land. Weld first.
+    bpy.ops.mesh.remove_doubles(threshold=1e-6)
     bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.004)
     bpy.ops.uv.pack_islands(margin=0.004)
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -217,7 +237,7 @@ def op(fn, **kw):
     return fn(**use)
 
 
-def bake(high, low, diag, a, outdir):
+def bake(high, low, diag, a, outdir, maps=("basecolor", "normal", "roughness")):
     cycles_device()
     mat = bpy.data.materials.new(a.name)
     mat.use_nodes = True
@@ -239,9 +259,10 @@ def bake(high, low, diag, a, outdir):
     bpy.context.view_layer.objects.active = low
     common = dict(use_selected_to_active=True, cage_extrusion=diag * 0.01,
                   max_ray_distance=diag * 0.04, margin=8)
-    for node, kind, extra in ((base, "DIFFUSE", dict(pass_filter={"COLOR"})),
-                              (nrm, "NORMAL", dict(normal_space="TANGENT")),
-                              (rough, "ROUGHNESS", {})):
+    jobs = {"basecolor": (base, "DIFFUSE", dict(pass_filter={"COLOR"})),
+            "normal": (nrm, "NORMAL", dict(normal_space="TANGENT")),
+            "roughness": (rough, "ROUGHNESS", {})}
+    for node, kind, extra in (jobs[m] for m in maps):
         for n in nt.nodes:
             n.select = False
         node.select = True
@@ -254,10 +275,12 @@ def bake(high, low, diag, a, outdir):
         log("baked", os.path.basename(path))
 
     nt.links.new(base.outputs["Color"], bsdf.inputs["Base Color"])
-    nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
-    nm = nt.nodes.new("ShaderNodeNormalMap")
-    nt.links.new(nrm.outputs["Color"], nm.inputs["Color"])
-    nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+    if "roughness" in maps:
+        nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+    if "normal" in maps:
+        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nt.links.new(nrm.outputs["Color"], nm.inputs["Color"])
+        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
     bsdf.inputs["Metallic"].default_value = 0.0
 
 
@@ -318,11 +341,33 @@ def main():
     os.makedirs(outdir, exist_ok=True)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     meshes = import_any(os.path.abspath(a.high))
+    fix_materials(meshes)
 
     if a.mode == "clean":
         diag = ground(meshes)
         log("clean:", ", ".join(stats(o) for o in meshes))
         export(meshes, a, outdir)
+        return
+
+    if a.mode == "transfer":
+        # --high is the painted (reduced) model, --dense the full-count one. Same shape,
+        # so the painted colour bakes straight across; the dense mesh keeps its own
+        # geometry, which is the whole point, so no normal map.
+        src = join(meshes)
+        before = set(bpy.context.scene.objects)
+        new = import_any(os.path.abspath(a.dense))
+        dense = join([o for o in new if o not in before])
+        dense.name = a.name
+        # Its GLB brings an empty material; left in slot 0, every face keeps using it and
+        # the bake lands in a material nothing shows -- a black texture.
+        dense.data.materials.clear()
+        diag = ground([src, dense])
+        log("transfer:", stats(src), "->", stats(dense))
+        unwrap(dense)
+        bake(src, dense, diag, a, outdir, maps=("basecolor", "roughness"))
+        bpy.data.objects.remove(src, do_unlink=True)
+        export([dense], a, outdir)
+        log("done:", stats(dense))
         return
 
     high = join(meshes)

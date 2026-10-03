@@ -34,7 +34,7 @@ def blender_cmd():
             "--python", str(HERE / "retopo.py"), "--"]
 
 
-def retopo(high, out, name, a):
+def retopo(high, out, name, a, dense=None):
     cmd = blender_cmd() + [
            "--high", str(high), "--out", str(out), "--name", name, "--faces", str(a.faces),
            "--tex", str(a.tex), "--voxel", str(a.voxel)]
@@ -46,6 +46,8 @@ def retopo(high, out, name, a):
         cmd.append("--glb")
     if getattr(a, "clean", False):
         cmd += ["--mode", "clean"]
+    if dense:
+        cmd += ["--mode", "transfer", "--dense", str(dense)]
     print("[gen3d]", " ".join(cmd))
     subprocess.run(cmd, check=True)
     return Path(out) / f"{name}.fbx"
@@ -73,7 +75,10 @@ def main():
     m.add_argument("--no-texture", action="store_true")
     m.add_argument("--turbo", action="store_true", help="faster, slightly worse shape")
     m.add_argument("--seed", type=int, default=1234)
-    m.add_argument("--octree", type=int, default=384, help="shape resolution (256-512)")
+    m.add_argument("--polys", type=int, default=0,
+                   help="face count of the high-poly model (0 = whatever the AI makes)")
+    m.add_argument("--octree", type=int, default=None,
+                   help="shape resolution 256-512 (default: 384, or 512 above 500k --polys)")
     m.add_argument("--paint-faces", type=int, default=100000,
                    help="the textured mesh is reduced to this many faces first (painting is slow)")
     m.add_argument("--retopo", action="store_true",
@@ -98,11 +103,18 @@ def main():
 
     if a.cmd == "make":
         from gen3d.shape import generate
-        high = generate(a.image, out / "high", left=a.left, back=a.back, right=a.right,
-                        texture=not a.no_texture, seed=a.seed, octree=a.octree, turbo=a.turbo,
-                        paint_faces=a.paint_faces)
+        high, dense = generate(a.image, out / "high", left=a.left, back=a.back, right=a.right,
+                               texture=not a.no_texture, seed=a.seed, octree=a.octree,
+                               turbo=a.turbo, paint_faces=a.paint_faces, faces=a.polys or None)
         if a.retopo:
             fbx = retopo(high, out, name, a)
+        elif dense:
+            # Bigger than the painter takes: bake its colour onto the full-count mesh.
+            a.glb = True
+            if a.polys > 1_000_000 and a.tex < 4096:
+                a.tex = 4096
+            fbx = retopo(high, out, name, a, dense=dense)
+            shutil.copy(out / "high" / "shape.glb", out / f"{name}_highres.glb")
         else:
             # The high-poly as the AI made it: grounded, centred, FBX with its texture,
             # plus the GLBs untouched -- the textured one and the full-resolution shape
@@ -110,7 +122,7 @@ def main():
             a.clean = True
             fbx = retopo(high, out, name, a)
             shutil.copy(high, out / f"{name}.glb")
-            if (out / "high" / "shape.glb").exists() and high.name != "shape.glb":
+            if (out / "high" / "shape.glb").exists() and high.name not in ("shape.glb", "model.glb"):
                 shutil.copy(out / "high" / "shape.glb", out / f"{name}_highres.glb")
     elif a.cmd == "retopo":
         fbx = retopo(src, out, name, a)

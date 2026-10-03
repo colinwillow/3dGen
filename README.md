@@ -48,8 +48,15 @@ and that window is the app running; close it to stop the app. Your browser then 
 
 1. Drop in a photo, plus optional left/back/right views for a better back side. Or switch to
    **Retopo a mesh** and drop in a high-poly GLB/FBX/OBJ you already have.
-2. **Output: High-poly** (default) gives you the AI's textured model as-is. **Quad retopo**
-   adds an automatic QuadriFlow pass, which shows face count, topology and symmetry settings.
+2. **Output: High-poly** (default) gives you the AI's textured model. The **Polygons** slider
+   sets its face count, from 10k to 2M (Tripo's high-poly ceiling):
+   - up to 100k, the AI paints the mesh directly;
+   - above that, the AI paints a 100k copy and Blender bakes that colour onto the denser mesh;
+   - above 500k, it also runs a finer shape pass (octree 512) and bakes at 4K once you pass 1M.
+   You can't get more faces than the AI actually made: ask for more and the log says how many
+   you got. 2M takes several minutes, mostly the UV unwrap and the bake.
+   **Quad retopo** adds an automatic QuadriFlow pass, which shows face count, topology and
+   symmetry settings.
 3. Click **Generate** and watch the stages: Shape → Texture → Export (plus Quads → Bake for retopo).
 4. Spin the result around in the viewer. **Wireframe** shows the real quad edges, not the
    triangulated preview. Then click **Download FBX**. High-poly jobs also offer the textured
@@ -68,6 +75,9 @@ conda activate gen3d && cd ~/3dGen
 
 # one image -> textured high-poly FBX/GLB (your Windows files are under /mnt/c)
 python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png
+
+# ... at a chosen polygon count (10k-2M)
+python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png --polys 1000000
 
 # ... plus an automatic quad retopo at ~5000 faces
 python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png --retopo --faces 5000

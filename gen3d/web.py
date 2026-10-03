@@ -32,6 +32,7 @@ STAGES = [
     (r"\[shape\] \d+ faces", "texture"),
     (r"\[retopo\] high:", "quads"),
     (r"\[retopo\] clean:", "export"),
+    (r"\[retopo\] transfer:", "bake"),
     (r"\[retopo\] baking on", "bake"),
     (r"\[retopo\] wrote .*\.fbx", "export"),
     (r"\[gen3d\] done", "done"),
@@ -158,7 +159,7 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
                      faces: int = Form(5000), tris: bool = Form(False),
                      symmetry: bool = Form(False), tex: int = Form(2048),
                      turbo: bool = Form(False), texture: bool = Form(True),
-                     retopo: bool = Form(False)):
+                     retopo: bool = Form(False), polys: int = Form(100000)):
     src = mesh if mesh and mesh.filename else front
     if not src or not src.filename:
         raise HTTPException(400, "upload a photo (or a mesh)")
@@ -178,6 +179,7 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
         return p
 
     faces = max(200, min(200000, faces))
+    polys = max(10000, min(2000000, polys))
     tex = tex if tex in (512, 1024, 2048, 4096) else 2048
     opts = ["--faces", str(faces), "--tex", str(tex), "--name", jid, "--out", str(JOBS)]
     opts += ["--tris"] * tris + ["--symmetry"] * symmetry
@@ -192,10 +194,12 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
             if q:
                 cmd += [f"--{k}", str(q)]
         cmd += ["--turbo"] * turbo + ["--no-texture"] * (not texture) + ["--retopo"] * retopo
+        if not retopo:
+            cmd += ["--polys", str(polys)]
         mode = "make" if retopo else "high"
     m = dict(id=jid, name=stem, mode=mode, status="queued", stage="queued", cmd=cmd,
              created=time.time(),
-             params=dict(faces=faces, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo,
+             params=dict(faces=faces, polys=polys, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo,
                          retopo=retopo or mode == "retopo"))
     save(m)
     work.put(jid)
