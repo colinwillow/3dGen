@@ -14,7 +14,7 @@ nvidia-smi || { echo "No GPU visible in WSL. Update the Windows NVIDIA driver an
 echo "== system packages =="
 sudo apt-get update -y
 sudo apt-get install -y build-essential git wget curl xz-utils \
-  libgl1 libglib2.0-0 libxi6 libxrender1 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3
+  libgl1 libopengl0 libglib2.0-0 libxi6 libxrender1 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3
 
 echo "== conda =="
 if [ ! -d "$HOME/miniforge3" ]; then
