@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3dGen</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a; --text:#e7eaf0;
+    --dim:#8b93a3; --accent:#6ee7b7; --accent2:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --r:10px;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  button,input,select{font:inherit;color:inherit}
+  .app{display:grid;grid-template-columns:340px 1fr;height:100vh}
+  aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .brand{padding:16px 18px;font-weight:700;font-size:17px;letter-spacing:.3px;border-bottom:1px solid var(--line)}
+  .brand span{color:var(--accent)}
+  .scroll{overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:16px}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;padding:7px 8px;border-radius:7px;cursor:pointer;color:var(--dim)}
+  .seg button.on{background:var(--line);color:var(--text)}
+  .drop{border:1.5px dashed var(--line);border-radius:var(--r);background:var(--panel2);display:flex;
+    align-items:center;justify-content:center;text-align:center;color:var(--dim);cursor:pointer;
+    position:relative;overflow:hidden;transition:border-color .15s}
+  .drop.big{height:190px}
+  .drop.small{height:78px;font-size:12px}
+  .drop:hover,.drop.over{border-color:var(--accent)}
+  .drop img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#0b0d10}
+  .drop .x{position:absolute;top:5px;right:6px;z-index:2;background:#000a;border:0;border-radius:6px;
+    width:22px;height:22px;cursor:pointer;display:none}
+  .drop.has .x{display:block}
+  .drop input{display:none}
+  .views{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  label.h{display:block;font-size:12px;color:var(--dim);margin:0 0 6px;text-transform:uppercase;letter-spacing:.6px}
+  .row{display:flex;gap:8px;align-items:center}
+  .row input[type=number],select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+  .chips{display:flex;gap:6px;margin-top:6px}
+  .chips button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:4px 0;
+    cursor:pointer;color:var(--dim);font-size:12px}
+  .chips button:hover{color:var(--text)}
+  .check{display:flex;gap:8px;align-items:center;color:var(--text);cursor:pointer}
+  .check small{color:var(--dim)}
+  .go{background:var(--accent2);color:#04281b;border:0;border-radius:var(--r);padding:12px;font-weight:700;
+    cursor:pointer;font-size:15px}
+  .go:disabled{opacity:.45;cursor:default}
+  .hist{display:flex;flex-direction:column;gap:6px}
+  .job{display:flex;gap:10px;align-items:center;padding:7px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .job:hover{background:var(--panel2)}
+  .job.sel{background:var(--panel2);border-color:var(--line)}
+  .job .t{width:42px;height:42px;border-radius:6px;background:#0b0d10 center/cover no-repeat;flex:none;
+    display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px}
+  .job .n{flex:1;min-width:0}
+  .job .n b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .job .n i{font-style:normal;font-size:12px;color:var(--dim)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dim)}
+  .dot.done{background:var(--accent)} .dot.failed{background:var(--bad)}
+  .dot.running{background:var(--warn);animation:pulse 1s infinite alternate}
+  @keyframes pulse{to{opacity:.3}}
+  .muted{color:var(--dim);font-size:12px}
+  main{position:relative;min-width:0;min-height:0}
+  #view{position:absolute;inset:0}
+  .bar{position:absolute;display:flex;gap:8px;align-items:center}
+  .tl{top:14px;left:14px} .tr{top:14px;right:14px} .bl{bottom:14px;left:14px} .br{bottom:14px;right:14px}
+  .pill{background:#171a21e6;border:1px solid var(--line);border-radius:999px;padding:6px 12px;backdrop-filter:blur(6px)}
+  .btn{background:#171a21e6;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;
+    text-decoration:none;color:var(--text);backdrop-filter:blur(6px)}
+  .btn.primary{background:var(--accent2);color:#04281b;border-color:var(--accent2);font-weight:700}
+  .btn:hover{border-color:var(--dim)}
+  .modes .btn.on{border-color:var(--accent);color:var(--accent)}
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    color:var(--dim);gap:6px;pointer-events:none;text-align:center;padding:20px}
+  .empty b{color:var(--text);font-size:18px}
+  .prog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,90%);
+    background:#171a21f2;border:1px solid var(--line);border-radius:14px;padding:20px;display:none}
+  .prog.on{display:block}
+  .steps{display:flex;gap:6px;margin:14px 0 10px}
+  .steps div{flex:1;text-align:center;font-size:12px;color:var(--dim)}
+  .steps div::before{content:"";display:block;height:4px;border-radius:2px;background:var(--line);margin-bottom:6px}
+  .steps div.done{color:var(--text)} .steps div.done::before{background:var(--accent)}
+  .steps div.now{color:var(--warn)} .steps div.now::before{background:var(--warn);animation:pulse .8s infinite alternate}
+  details{margin-top:8px} summary{cursor:pointer;color:var(--dim);font-size:12px}
+  pre{max-height:220px;overflow:auto;background:#0b0d10;border-radius:8px;padding:10px;font-size:11px;
+    white-space:pre-wrap;word-break:break-all;margin:8px 0 0}
+  .fail{color:var(--bad)}
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr;grid-template-rows:auto 60vh;height:auto}
+    main{height:60vh;order:-1}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">3d<span>Gen</span></div>
+    <div class="scroll">
+      <div class="seg" id="srcSeg">
+        <button data-v="photo" class="on">From photo</button>
+        <button data-v="mesh">Retopo a mesh</button>
+      </div>
+
+      <div id="photoIn">
+        <div class="drop big" data-k="front"><input type="file" accept="image/*">
+          <div>Drop a photo here<br><span class="muted">or click to choose · png, jpg, webp</span></div></div>
+        <label class="h" style="margin-top:12px">More views <span style="text-transform:none">(optional, better backs)</span></label>
+        <div class="views">
+          <div class="drop small" data-k="left"><input type="file" accept="image/*">Left</div>
+          <div class="drop small" data-k="back"><input type="file" accept="image/*">Back</div>
+          <div class="drop small" data-k="right"><input type="file" accept="image/*">Right</div>
+        </div>
+      </div>
+      <div id="meshIn" hidden>
+        <div class="drop big" data-k="mesh"><input type="file" accept=".glb,.gltf,.fbx,.obj">
+          <div>Drop a high-poly mesh<br><span class="muted">glb, fbx, obj · its texture is baked onto the new mesh</span></div></div>
+      </div>
+
+      <div>
+        <label class="h">Face count</label>
+        <div class="row"><input type="number" id="faces" value="5000" min="200" max="200000" step="100"></div>
+        <div class="chips" id="faceChips">
+          <button data-f="1500">1.5k</button><button data-f="3000">3k</button><button data-f="5000">5k</button>
+          <button data-f="10000">10k</button><button data-f="20000">20k</button>
+        </div>
+      </div>
+      <div>
+        <label class="h">Topology</label>
+        <div class="seg" id="topoSeg"><button data-v="quads" class="on">Quads</button><button data-v="tris">Triangles</button></div>
+      </div>
+      <label class="check"><input type="checkbox" id="symmetry"> Symmetry <small>mirror the quads across X</small></label>
+      <div>
+        <label class="h">Texture size</label>
+        <select id="tex"><option>1024</option><option selected>2048</option><option>4096</option></select>
+      </div>
+      <label class="check" id="turboRow"><input type="checkbox" id="turbo"> Fast shape <small>quicker, a bit less detail</small></label>
+
+      <button class="go" id="go" disabled>Generate</button>
+
+      <div>
+        <label class="h">History</label>
+        <div class="hist" id="hist"><div class="muted">Nothing yet.</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="view"></div>
+    <div class="empty" id="empty"><b>Upload a photo to start</b>
+      <span>Your model shows up here. Drag to orbit, scroll to zoom.</span></div>
+    <div class="bar tl" id="title" hidden><span class="pill" id="titleTxt"></span></div>
+    <div class="bar tr modes" id="modes" hidden>
+      <button class="btn on" data-m="tex">Textured</button>
+      <button class="btn" data-m="clay">Clay</button>
+      <button class="btn" data-m="wire">Wireframe</button>
+    </div>
+    <div class="bar bl" id="stats" hidden><span class="pill" id="statsTxt"></span></div>
+    <div class="bar br" id="dl" hidden></div>
+    <div class="prog" id="prog">
+      <div class="row" style="justify-content:space-between"><b id="progTitle">Working…</b><span class="muted" id="elapsed"></span></div>
+      <div class="steps" id="steps"></div>
+      <div class="muted" id="progNote"></div>
+      <details><summary>Log</summary><pre id="log"></pre></details>
+    </div>
+  </main>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"/vendor/three/three.module.min.js",
+            "three/addons/":"/vendor/three/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+const $ = s => document.querySelector(s);
+const files = {};          // front/left/back/right/mesh -> File
+let src = "photo", topo = "quads", current = null, shown = null, mode = "tex";
+
+// ---------- upload form ----------
+for (const d of document.querySelectorAll(".drop")) {
+  const k = d.dataset.k, inp = d.querySelector("input");
+  const x = Object.assign(document.createElement("button"), { className: "x", textContent: "×" });
+  d.append(x);
+  const label = d.querySelector(":scope > div"), labelHTML = label?.innerHTML;
+  const set = f => {
+    files[k] = f;
+    d.querySelector("img")?.remove();
+    d.classList.toggle("has", !!f);
+    if (label) label.innerHTML = labelHTML;
+    if (f && f.type.startsWith("image/")) {
+      const img = new Image(); img.src = URL.createObjectURL(f); d.append(img);
+    } else if (f && label) {
+      label.innerHTML = `<b style="color:var(--text)"></b><br><span class="muted">ready</span>`;
+      label.querySelector("b").textContent = f.name;
+    }
+    validate();
+  };
+  d.onclick = e => { if (e.target !== x) inp.click(); };
+  x.onclick = e => { e.stopPropagation(); inp.value = ""; set(null); };
+  inp.onchange = () => set(inp.files[0] || null);
+  d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
+  d.ondragleave = () => d.classList.remove("over");
+  d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); if (e.dataTransfer.files[0]) set(e.dataTransfer.files[0]); };
+}
+function seg(el, cb) {
+  el.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    el.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); cb(b.dataset.v);
+  };
+}
+seg($("#srcSeg"), v => {
+  src = v; $("#photoIn").hidden = v !== "photo"; $("#meshIn").hidden = v !== "mesh";
+  $("#turboRow").hidden = v !== "photo"; validate();
+});
+seg($("#topoSeg"), v => topo = v);
+$("#faceChips").onclick = e => { const f = e.target.dataset.f; if (f) $("#faces").value = f; };
+function validate() { $("#go").disabled = !(src === "photo" ? files.front : files.mesh); }
+
+$("#go").onclick = async () => {
+  const fd = new FormData();
+  if (src === "photo") for (const k of ["front", "left", "back", "right"]) { if (files[k]) fd.append(k, files[k]); }
+  else fd.append("mesh", files.mesh);
+  fd.append("faces", $("#faces").value);
+  fd.append("tris", topo === "tris");
+  fd.append("symmetry", $("#symmetry").checked);
+  fd.append("tex", $("#tex").value);
+  fd.append("turbo", $("#turbo").checked);
+  $("#go").disabled = true;
+  const r = await fetch("/api/jobs", { method: "POST", body: fd });
+  validate();
+  if (!r.ok) { alert((await r.json()).detail || "upload failed"); return; }
+  const j = await r.json();
+  await refresh(); select(j.id);
+};
+
+// ---------- viewer ----------
+const host = $("#view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+host.append(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1115);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3, 5, 4); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(40, 1, .01, 1000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+const grid = new THREE.GridHelper(10, 20, 0x2a2f3a, 0x1e222b); scene.add(grid);
+const clay = new THREE.MeshStandardMaterial({ color: 0x9096a2, roughness: .75, metalness: 0 });
+let model = null, wire = null, texMats = new Map();
+
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(host); resize();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+function clearModel() {
+  for (const o of [model, wire]) if (o) scene.remove(o);
+  model = wire = null; texMats.clear();
+}
+async function showModel(j) {
+  clearModel();
+  const gltf = await new GLTFLoader().loadAsync(j.files.preview + "?t=" + j.finished);
+  model = gltf.scene;
+  model.traverse(o => { if (o.isMesh) texMats.set(o, o.material); });
+  scene.add(model);
+  if (j.files.wire) {
+    const buf = await (await fetch(j.files.wire + "?t=" + j.finished)).arrayBuffer();
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buf), 3));
+    wire = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x6ee7b7, transparent: true, opacity: .85 }));
+    scene.add(wire);
+  }
+  const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()).length();
+  const c = box.getCenter(new THREE.Vector3());
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(.55, .35, 1).normalize().multiplyScalar(size * 1.25));
+  camera.near = size / 200; camera.far = size * 50; camera.updateProjectionMatrix();
+  grid.scale.setScalar(size / 4); grid.position.y = box.min.y;
+  applyMode();
+}
+function applyMode() {
+  document.querySelectorAll("#modes .btn").forEach(b => b.classList.toggle("on", b.dataset.m === mode));
+  if (!model) return;
+  for (const [o, m] of texMats) {
+    o.material = mode === "tex" ? m : clay;
+    o.material.polygonOffset = true; o.material.polygonOffsetFactor = 1; o.material.polygonOffsetUnits = 1;
+  }
+  if (wire) wire.visible = mode === "wire";
+}
+$("#modes").onclick = e => { const m = e.target.dataset.m; if (m) { mode = m; applyMode(); } };
+
+// ---------- jobs ----------
+const STEPS_MAKE = [["shape", "Shape"], ["texture", "Texture"], ["quads", "Quads"], ["bake", "Bake"], ["export", "Export"]];
+const STEPS_RETOPO = STEPS_MAKE.slice(2);
+const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? "just now" : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t * 1000).toLocaleDateString(); };
+const mmss = s => `${s / 60 | 0}:${String(s % 60 | 0).padStart(2, "0")}`;
+
+async function refresh() {
+  const jobs = await (await fetch("/api/jobs")).json();
+  const h = $("#hist");
+  if (!jobs.length) { h.innerHTML = '<div class="muted">Nothing yet.</div>'; return jobs; }
+  h.innerHTML = "";
+  for (const j of jobs) {
+    const el = document.createElement("div");
+    el.className = "job" + (j.id === current ? " sel" : "");
+    const st = j.status === "done" && j.stats ? `${j.stats.faces.toLocaleString()} ${j.params.tris ? "tris" : "quads"}`
+      : j.status === "running" ? `working · ${j.stage}` : j.status;
+    el.innerHTML = `<div class="t" style="${j.files.thumb ? `background-image:url('${j.files.thumb}')` : ""}">${j.files.thumb ? "" : "mesh"}</div>
+      <div class="n"><b></b><i>${st} · ${ago(j.created)}</i></div><div class="dot ${j.status}"></div>`;
+    el.querySelector("b").textContent = j.name;
+    el.onclick = () => select(j.id);
+    h.append(el);
+  }
+  return jobs;
+}
+
+async function select(id) {
+  current = id; shown = null;
+  document.querySelectorAll(".job").forEach(e => e.classList.remove("sel"));
+  refresh();
+  await poll();
+}
+
+async function poll() {
+  if (!current) return;
+  const r = await fetch("/api/jobs/" + current);
+  if (!r.ok) { current = null; return; }
+  const j = await r.json();
+  $("#empty").hidden = true;
+  $("#title").hidden = false; $("#titleTxt").textContent = j.name;
+  const busy = j.status === "queued" || j.status === "running";
+  const failed = j.status === "failed";
+  $("#prog").classList.toggle("on", busy || failed);
+  $("#log").textContent = j.log;
+  if (busy || failed) {
+    const steps = j.mode === "retopo" ? STEPS_RETOPO : STEPS_MAKE;
+    const at = steps.findIndex(s => s[0] === j.stage);
+    $("#steps").innerHTML = steps.map((s, i) =>
+      `<div class="${i < at ? "done" : i === at && !failed ? "now" : ""}">${s[1]}</div>`).join("");
+    $("#progTitle").textContent = failed ? "That one failed" : j.status === "queued" ? "Waiting in line…" : "Working…";
+    $("#progTitle").className = failed ? "fail" : "";
+    $("#progNote").textContent = failed ? "The log below says why. Paste it to Claude if it isn't obvious."
+      : j.status === "queued" ? `${j.queue} ahead of it` : j.mode === "make" && at <= 1 ? "The AI stage takes a few minutes. The first run also downloads the models (~10 GB)." : "";
+    if (failed) $("#prog details").open = true;
+    const t0 = j.started || j.created, t1 = j.finished || Date.now() / 1000;
+    $("#elapsed").textContent = mmss(t1 - t0);
+    if (!failed && !model) clearModel();
+  }
+  const done = j.status === "done";
+  for (const id of ["#modes", "#stats", "#dl"]) $(id).hidden = !done;
+  if (done && shown !== j.id) {
+    shown = j.id;
+    const s = j.stats;
+    $("#statsTxt").textContent = s ? `${s.faces.toLocaleString()} faces · ${s.quads.toLocaleString()} quads · ${s.tris.toLocaleString()} tris` : "";
+    const dl = [`<a class="btn primary" href="${j.files.fbx}" download>Download FBX</a>`];
+    if (j.files.glb) dl.push(`<a class="btn" href="${j.files.glb}" download>GLB</a>`);
+    for (const t of j.files.textures) dl.push(`<a class="btn" href="${t}" download>${t.split("_").pop().replace(".png", "")}</a>`);
+    $("#dl").innerHTML = dl.join("");
+    await showModel(j);
+    refresh();
+  }
+  if (!done) { shown = null; if (model && busy) clearModel(); }
+  if (busy) setTimeout(() => { if (current === j.id) poll(); }, 1500);
+  else if (failed) refresh();
+}
+
+const first = await refresh();
+setInterval(refresh, 8000);
+if (first.length) select(first[0].id);
+</script>
+</body>
+</html>

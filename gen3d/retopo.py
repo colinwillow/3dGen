@@ -243,6 +243,32 @@ def export(objs, a, outdir):
         glb = os.path.join(outdir, a.name + ".glb")
         bpy.ops.export_scene.gltf(filepath=glb, export_format="GLB", use_selection=True)
         log("wrote", glb, "(triangulated -- glTF has no quads)")
+    preview(objs, outdir)
+
+
+def preview(objs, outdir):
+    """What the web viewer shows: a textured GLB (browsers can't draw quads, so
+    it's triangulated) plus the REAL quad edges as line pairs, so the wireframe
+    shows the topology you'll get in the FBX rather than the triangulation."""
+    import json
+    import struct
+    bpy.ops.export_scene.gltf(filepath=os.path.join(outdir, "preview.glb"),
+                              export_format="GLB", use_selection=True)
+    data, faces, quads, tris = bytearray(), 0, 0, 0
+    for o in objs:
+        mw, me = o.matrix_world, o.data
+        vs = [mw @ v.co for v in me.vertices]
+        for e in me.edges:
+            for i in e.vertices:
+                v = vs[i]
+                data += struct.pack("<3f", v.x, v.z, -v.y)  # Blender Z-up -> glTF Y-up
+        faces += len(me.polygons)
+        quads += sum(1 for p in me.polygons if len(p.vertices) == 4)
+        tris += sum(1 for p in me.polygons if len(p.vertices) == 3)
+    with open(os.path.join(outdir, "wire.bin"), "wb") as f:
+        f.write(data)
+    with open(os.path.join(outdir, "stats.json"), "w") as f:
+        json.dump(dict(faces=faces, quads=quads, tris=tris, ngons=faces - quads - tris), f)
 
 
 def main():
@@ -271,3 +297,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Everything is written by now. Blender can segfault while tearing itself
+    # down after glTF exports, which would turn a finished job into a failed
+    # one -- so skip the teardown entirely.
+    sys.stdout.flush()
+    os._exit(0)

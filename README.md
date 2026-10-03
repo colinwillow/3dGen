@@ -40,7 +40,24 @@ These models' CUDA extensions are much easier to build on Linux, so this runs in
    It installs conda, CUDA 12.4, PyTorch, Hunyuan3D-2 and a headless Blender 4.2. Allow
    20–40 minutes. The model weights (~10 GB) download on the first run.
 
-## Use
+## Use: the web app
+
+Double-click **3dGen** on your desktop (the installer puts it there). A small window opens,
+and that window is the app running; close it to stop the app. Your browser then opens
+**http://localhost:7860**:
+
+1. Drop in a photo, plus optional left/back/right views for a better back side. Or switch to
+   **Retopo a mesh** and drop in a high-poly GLB/FBX/OBJ you already have.
+2. Set the face count and choose quads or triangles, and symmetry if you want it.
+3. Click **Generate** and watch the stages: Shape → Texture → Quads → Bake → Export.
+4. Spin the result around in the viewer. **Wireframe** shows the real quad edges, not the
+   triangulated preview. Then click **Download FBX** (and the texture maps if you want them
+   separately).
+
+Every result stays in the History list (stored in `3dGen/jobs/`). Jobs run one at a time.
+If you queue several, they wait their turn, and they resume if you close the app halfway.
+
+## Use: the command line (same pipeline)
 
 Open an Ubuntu terminal, then:
 
@@ -78,7 +95,7 @@ export TRIPO_API_KEY=tsk_...
 python -m gen3d tripo robot.png --faces 5000
 ```
 
-This sends the same image through Tripo's API with quads + smart low-poly + PBR, then
+**Optional, and it costs money:** it uses your own Tripo API key and spends your Tripo credits, like generating on their site. Nothing goes to Tripo unless you run this command. It sends the image through Tripo's API with quads + smart low-poly + PBR, then
 grounds and re-exports the result as FBX. The task fields follow Tripo's docs; if one is
 refused, `--set field=value` passes any option through without a code change.
 
@@ -86,5 +103,7 @@ refused, `--set field=value` passes any option through without a code change.
 
 - **Blender stage (remesh, UV, bake, FBX): tested** headless on a 65k-tri textured mesh →
   4,551 all-quad faces, textures baked, and the quads survived an FBX re-import.
+- **Web app: tested** in a headless browser: upload a mesh, progress, viewer (textured / clay /
+  quad wireframe), FBX and texture downloads, history.
 - **Hunyuan and Tripo stages: written against their documented APIs, not yet run on a
   GPU.** If the first run breaks, it will most likely be there. Paste the error back.

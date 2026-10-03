@@ -58,8 +58,18 @@ export CUDA_HOME="\$CONDA_PREFIX"
 export PYTHONPATH="$ROOT:\${PYTHONPATH:-}"
 EOF
 
+echo "== desktop shortcut =="
+# A .bat on the Windows desktop that starts the app inside WSL and opens the browser.
+DESK_WIN="$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2>/dev/null | tr -d '\r')"
+if [ -n "$DESK_WIN" ] && DESK="$(wslpath "$DESK_WIN" 2>/dev/null)" && [ -d "$DESK" ]; then
+  printf '@echo off\r\ntitle 3dGen (close this window to stop it)\r\nwsl.exe -d %s -e bash -lc "%s/start.sh"\r\n' \
+    "$WSL_DISTRO_NAME" "$ROOT" > "$DESK/3dGen.bat"
+  echo "  put 3dGen.bat on your desktop -- double-click it to open the app"
+else
+  echo "  couldn't find your Windows desktop; start the app with: $ROOT/start.sh"
+fi
+
 echo
-echo "Installed. Open a new Ubuntu terminal, then:"
-echo "  conda activate gen3d && cd $ROOT"
-echo "  python -m gen3d make /mnt/c/Users/<you>/Pictures/thing.png --faces 5000"
+echo "Installed. Double-click 3dGen on your desktop, or open a new Ubuntu terminal and:"
+echo "  $ROOT/start.sh          (then open http://localhost:7860)"
 echo "(model weights, ~10 GB, download on the first run)"
