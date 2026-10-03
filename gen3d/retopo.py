@@ -178,27 +178,43 @@ def unwrap(low):
 
 
 def cycles_device():
+    """CPU unless GEN3D_BAKE_GPU=1. A distro Blender ships no prebuilt GPU kernels
+    and tries to compile them with the system compiler -- which on new Ubuntu fails
+    and can leave the bake blank. Baking three maps on a modern CPU takes seconds."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 4
-    try:
-        prefs = bpy.context.preferences.addons["cycles"].preferences
-        for kind in ("OPTIX", "CUDA"):
-            try:
-                prefs.compute_device_type = kind
-                prefs.get_devices()
-                if any(d.type == kind for d in prefs.devices):
-                    for d in prefs.devices:
-                        d.use = True
-                    scene.cycles.device = "GPU"
-                    log("baking on", kind)
-                    return
-            except TypeError:
-                continue
-    except Exception:
-        pass
     scene.cycles.device = "CPU"
+    if os.environ.get("GEN3D_BAKE_GPU") == "1":
+        try:
+            prefs = bpy.context.preferences.addons["cycles"].preferences
+            for kind in ("OPTIX", "CUDA"):
+                try:
+                    prefs.compute_device_type = kind
+                    prefs.get_devices()
+                    if any(d.type == kind for d in prefs.devices):
+                        for d in prefs.devices:
+                            d.use = True
+                        scene.cycles.device = "GPU"
+                        log("baking on", kind)
+                        return
+                except TypeError:
+                    continue
+        except Exception:
+            pass
     log("baking on CPU")
+
+
+def op(fn, **kw):
+    """Call an exporter with only the options this Blender's version of it has.
+    Option names move between Blender releases (5.0 dropped the FBX exporter's
+    use_selection), and an unknown keyword is a hard error."""
+    have = set(fn.get_rna_type().properties.keys())
+    use = {k: v for k, v in kw.items() if k in have}
+    gone = sorted(set(kw) - set(use))
+    if gone:
+        log(f"note: {fn.idname_py()} in this Blender has no {', '.join(gone)}")
+    return fn(**use)
 
 
 def bake(high, low, diag, a, outdir):
@@ -255,13 +271,18 @@ def export(objs, a, outdir):
     bpy.context.view_layer.objects.active = objs[0]
     fbx = os.path.join(outdir, a.name + ".fbx")
     # path_mode COPY + embed: one file that opens in C4D/Blender with its textures.
-    bpy.ops.export_scene.fbx(filepath=fbx, use_selection=True, path_mode="COPY",
-                             embed_textures=True, apply_scale_options="FBX_SCALE_ALL",
-                             mesh_smooth_type="FACE", use_triangles=False)
+    # Some Blender versions can't export "selected only", so make the scene hold
+    # nothing else -- then exporting everything is the same thing.
+    for o in list(bpy.context.scene.objects):
+        if o not in objs:
+            bpy.data.objects.remove(o, do_unlink=True)
+    op(bpy.ops.export_scene.fbx, filepath=fbx, use_selection=True, path_mode="COPY",
+       embed_textures=True, apply_scale_options="FBX_SCALE_ALL",
+       mesh_smooth_type="FACE", use_triangles=False)
     log("wrote", fbx)
     if a.glb:
         glb = os.path.join(outdir, a.name + ".glb")
-        bpy.ops.export_scene.gltf(filepath=glb, export_format="GLB", use_selection=True)
+        op(bpy.ops.export_scene.gltf, filepath=glb, export_format="GLB", use_selection=True)
         log("wrote", glb, "(triangulated -- glTF has no quads)")
     preview(objs, outdir)
 
@@ -272,7 +293,7 @@ def preview(objs, outdir):
     shows the topology you'll get in the FBX rather than the triangulation."""
     import json
     import struct
-    bpy.ops.export_scene.gltf(filepath=os.path.join(outdir, "preview.glb"),
+    op(bpy.ops.export_scene.gltf, filepath=os.path.join(outdir, "preview.glb"),
                               export_format="GLB", use_selection=True)
     data, faces, quads, tris = bytearray(), 0, 0, 0
     for o in objs:
