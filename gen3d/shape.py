@@ -30,11 +30,42 @@ def _free(*objs):
     torch.cuda.empty_cache()
 
 
+
+# Hunyuan's own cleanup (FloaterRemover, FaceReducer) goes through pymeshlab, whose
+# file-format plugins need system OpenGL libraries a bare WSL install may lack -- it
+# then fails with "Unknown format for load: ply" right after the shape is made.
+# Try it first; if it can't run, do the same two jobs with trimesh.
+
+def clean(mesh):
+    try:
+        from hy3dgen.shapegen import FloaterRemover, DegenerateFaceRemover
+        return DegenerateFaceRemover()(FloaterRemover()(mesh))
+    except Exception as e:
+        print(f"[shape] pymeshlab cleanup unavailable ({e}); using trimesh")
+    import trimesh
+    parts = mesh.split(only_watertight=False)
+    if len(parts) <= 1:
+        return mesh
+    big = max(len(p.faces) for p in parts)
+    keep = [p for p in parts if len(p.faces) >= big * 0.01]  # drop floating specks
+    print(f"[shape] kept {len(keep)} of {len(parts)} pieces")
+    return trimesh.util.concatenate(keep)
+
+
+def reduce(mesh, faces):
+    if len(mesh.faces) <= faces:
+        return mesh
+    try:
+        from hy3dgen.shapegen import FaceReducer
+        return FaceReducer()(mesh, max_facenum=faces)
+    except Exception as e:
+        print(f"[shape] pymeshlab reducer unavailable ({e}); using fast-simplification")
+    return mesh.simplify_quadric_decimation(face_count=faces)
+
 def generate(front, out_dir, left=None, back=None, right=None, texture=True,
              steps=50, octree=384, seed=1234, paint_faces=60000, turbo=False):
     from hy3dgen.rembg import BackgroundRemover
-    from hy3dgen.shapegen import (Hunyuan3DDiTFlowMatchingPipeline, FaceReducer,
-                                  FloaterRemover, DegenerateFaceRemover)
+    from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -58,8 +89,7 @@ def generate(front, out_dir, left=None, back=None, right=None, texture=True,
                 generator=torch.manual_seed(seed), output_type="trimesh")[0]
     _free(pipe)
 
-    mesh = FloaterRemover()(mesh)
-    mesh = DegenerateFaceRemover()(mesh)
+    mesh = clean(mesh)
     mesh.export(out / "shape.glb")
     print(f"[shape] {len(mesh.faces)} faces -> {out / 'shape.glb'}")
     if not texture:
@@ -69,7 +99,7 @@ def generate(front, out_dir, left=None, back=None, right=None, texture=True,
     # afterwards. Painting a mesh this dense is slow, so it is reduced first --
     # still far denser than the low-poly it will be baked onto.
     from hy3dgen.texgen import Hunyuan3DPaintPipeline
-    mesh = FaceReducer()(mesh, max_facenum=paint_faces)
+    mesh = reduce(mesh, paint_faces)
     paint = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")
     front_img = image["front"] if multi else image
     mesh = paint(mesh, image=front_img)
