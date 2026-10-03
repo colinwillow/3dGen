@@ -16,7 +16,10 @@ Modes:
 import argparse
 import math
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 
 import bpy
 from mathutils import Vector
@@ -36,6 +39,10 @@ def parse():
     ap.add_argument("--voxel", type=float, default=0.006,
                     help="pre-remesh voxel size as a fraction of the model's size (0 = skip)")
     ap.add_argument("--symmetry", action="store_true", help="QuadriFlow X symmetry")
+    ap.add_argument("--engine", choices=["quadwild", "quadriflow"], default="quadwild",
+                    help="quad remesher (QuadWild falls back to QuadriFlow if it fails)")
+    ap.add_argument("--sharp", type=float, default=35,
+                    help="QuadWild: crease angle kept as a hard edge, in degrees (-1 = none)")
     ap.add_argument("--glb", action="store_true", help="also write a (triangulated) GLB")
     return ap.parse_args(argv)
 
@@ -154,7 +161,114 @@ def shell(high, diag, a, voxel):
     return low
 
 
+QW_DIR = os.environ.get("GEN3D_QUADWILD") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "third_party", "quadwild")
+QW_PREP = """do_remesh 1
+sharp_feature_thr {sharp:g}
+alpha {alpha:g}
+scaleFact 1
+"""
+
+
+def faces_in(obj_path):
+    n = 0
+    with open(obj_path) as f:
+        for line in f:
+            if line.startswith("f "):
+                n += 1
+    return n
+
+
+def quadwild(high, diag, a):
+    """QuadWild (Bi-MDF build): traces creases and curvature first, then lays the quads
+    along them -- loops follow brows, sockets and panel lines where QuadriFlow lays an
+    even grid over everything. Its face count is steered with scaleFact (quad size):
+    faces ~ 1/scale^2, so one pass to measure and one or two to land on the target."""
+    exe = os.path.join(QW_DIR, "quadwild")
+    qfp = os.path.join(QW_DIR, "quad_from_patches")
+    if not (os.path.exists(exe) and os.path.exists(qfp)):
+        log(f"QuadWild not installed at {QW_DIR} -- using QuadriFlow")
+        return None
+    tmp = tempfile.mkdtemp(prefix="qw_")
+    try:
+        # Clean, welded, triangulated copy. QuadWild re-meshes its input anyway, so a
+        # couple of hundred thousand triangles carry all the detail it will use.
+        src = high.copy()
+        src.data = high.data.copy()
+        bpy.context.collection.objects.link(src)
+        only(src)
+        src.data.materials.clear()
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.remove_doubles(threshold=diag * 1e-5)
+        bpy.ops.mesh.delete_loose()
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.quads_convert_to_tris()
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        if len(src.data.polygons) > 200000:
+            m = src.modifiers.new("dec", "DECIMATE")
+            m.ratio = 200000 / len(src.data.polygons)
+            bpy.ops.object.modifier_apply(modifier=m.name)
+        mesh = os.path.join(tmp, "mesh.obj")
+        bpy.ops.wm.obj_export(filepath=mesh, export_selected_objects=True, export_materials=False,
+                              export_uv=False, export_normals=False, apply_modifiers=True)
+        bpy.data.objects.remove(src, do_unlink=True)
+
+        prep = os.path.join(tmp, "prep.txt")
+        with open(prep, "w") as f:
+            f.write(QW_PREP.format(sharp=a.sharp, alpha=0.01 if a.sharp >= 0 else 0.02))
+        log(f"QuadWild: tracing features (crease {a.sharp:g} deg)")
+        r = subprocess.run([exe, mesh, "2", prep], cwd=QW_DIR, capture_output=True, text=True)
+        patches = os.path.join(tmp, "mesh_rem_p0.obj")
+        if not os.path.exists(patches):
+            log("QuadWild could not prepare this mesh:", (r.stdout + r.stderr)[-600:])
+            return None
+
+        with open(os.path.join(QW_DIR, "config", "main_config", "flow.txt")) as f:
+            flow = f.read()
+        scale, got, best = 1.0, 0, None
+        for i in range(4):
+            cfg = os.path.join(tmp, f"flow{i}.txt")
+            with open(cfg, "w") as f:
+                f.write(flow.replace("\nscaleFact 1\n", f"\nscaleFact {scale:.4f}\n"))
+            out = os.path.join(tmp, f"mesh_rem_p0_{i}_quadrangulation_smooth.obj")
+            # It writes the result and then often segfaults on exit: the file decides.
+            subprocess.run([qfp, patches, str(i), cfg], cwd=QW_DIR, capture_output=True)
+            if not os.path.exists(out):
+                break
+            got = faces_in(out)
+            log(f"QuadWild: quad size x{scale:.2f} -> {got} faces")
+            if not best or abs(got - a.faces) < abs(best[1] - a.faces):
+                best = (out, got)
+            if got and abs(got - a.faces) <= a.faces * 0.12:
+                break
+            scale *= math.sqrt(max(got, 1) / a.faces)
+        if not best:
+            log("QuadWild could not quadrangulate this mesh")
+            return None
+
+        before = set(bpy.context.scene.objects)
+        bpy.ops.wm.obj_import(filepath=best[0])
+        low = [o for o in bpy.context.scene.objects if o not in before][0]
+        low.name = a.name
+        low.data.materials.clear()
+        only(low)
+        if a.symmetry:
+            log("note: QuadWild has no symmetry option; symmetry is ignored")
+        return low
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def remesh(high, diag, a):
+    if not a.tris and a.engine == "quadwild":
+        low = quadwild(high, diag, a)
+        if low:
+            bpy.ops.object.shade_smooth()
+            log("low:", stats(low))
+            return low
+        log("falling back to QuadriFlow")
     if a.tris:
         low = shell(high, diag, a, a.voxel)
         m = low.modifiers.new("dec", "DECIMATE")

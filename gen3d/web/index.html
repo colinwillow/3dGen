@@ -107,11 +107,19 @@
       <div id="photoIn">
         <div class="drop big" data-k="front"><input type="file" accept="image/*">
           <div>Drop a photo here<br><span class="muted">or click to choose · png, jpg, webp</span></div></div>
+        <label class="h" style="margin-top:12px">Shape model</label>
+        <div class="seg" id="modelSeg"><button data-v="trellis">TRELLIS.2</button><button data-v="hunyuan">Hunyuan3D-2</button></div>
+        <div class="muted" id="modelNote" style="margin-top:6px"></div>
+        <div class="row" id="resRow" style="margin-top:8px"><select id="res">
+          <option value="1536" selected>Detail: max (1536)</option><option value="1024">Detail: high (1024)</option>
+          <option value="512">Detail: draft (512)</option></select></div>
+        <div id="viewsBox">
         <label class="h" style="margin-top:12px">More views <span style="text-transform:none">(optional, better backs)</span></label>
         <div class="views">
           <div class="drop small" data-k="left"><input type="file" accept="image/*">Left</div>
           <div class="drop small" data-k="back"><input type="file" accept="image/*">Back</div>
           <div class="drop small" data-k="right"><input type="file" accept="image/*">Right</div>
+        </div>
         </div>
       </div>
       <div id="meshIn" hidden>
@@ -133,7 +141,7 @@
         </div>
         <div class="muted" id="polyNote" style="margin-top:6px"></div>
       </div>
-      <div id="retopoOpts">
+      <div id="retopoOpts" style="display:flex;flex-direction:column;gap:16px">
       <div>
         <label class="h">Face count</label>
         <div class="row"><input type="number" id="faces" value="5000" min="200" max="200000" step="100"></div>
@@ -146,7 +154,13 @@
         <label class="h">Topology</label>
         <div class="seg" id="topoSeg"><button data-v="quads" class="on">Quads</button><button data-v="tris">Triangles</button></div>
       </div>
-      <label class="check"><input type="checkbox" id="symmetry"> Symmetry <small>mirror the quads across X</small></label>
+      <div id="engineRow">
+        <label class="h">Quad engine</label>
+        <div class="seg" id="engineSeg"><button data-v="quadwild" class="on">QuadWild</button><button data-v="quadriflow">QuadriFlow</button></div>
+        <div class="muted" id="engineNote" style="margin-top:6px"></div>
+      </div>
+      <label class="check" id="hardRow"><input type="checkbox" id="hard" checked> Hard edges <small>off for organic shapes</small></label>
+      <label class="check" id="symRow"><input type="checkbox" id="symmetry"> Symmetry <small>mirror the quads across X</small></label>
       <div>
         <label class="h">Texture size</label>
         <select id="tex"><option>1024</option><option selected>2048</option><option>4096</option></select>
@@ -196,7 +210,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const $ = s => document.querySelector(s);
 const files = {};          // front/left/back/right/mesh -> File
-let src = "photo", topo = "quads", out = "high", current = null, shown = null, mode = "tex";
+let shapeModel = "hunyuan", src = "photo", topo = "quads", out = "high", current = null, shown = null, mode = "tex";
 
 // ---------- upload form ----------
 for (const d of document.querySelectorAll(".drop")) {
@@ -232,9 +246,34 @@ function seg(el, cb) {
 }
 seg($("#srcSeg"), v => {
   src = v; $("#photoIn").hidden = v !== "photo"; $("#meshIn").hidden = v !== "mesh";
-  $("#turboRow").hidden = v !== "photo"; syncOpts(); validate();
+  syncOpts(); syncModel(); validate();
 });
-seg($("#topoSeg"), v => topo = v);
+seg($("#modelSeg"), v => { shapeModel = v; syncModel(); setPolys(polys); });
+function syncModel() {
+  for (const b of $("#modelSeg").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === shapeModel);
+  const tr = shapeModel === "trellis";
+  $("#resRow").hidden = !tr; $("#viewsBox").hidden = tr;
+  $("#turboRow").hidden = tr || src !== "photo";
+  $("#modelNote").textContent = !info.trellis && tr ? "Not installed yet: re-run setup/install_wsl.sh."
+    : tr ? "Microsoft's model: much finer shape detail, its own PBR texture. One photo."
+    : "Tencent's model: softer shapes. Takes extra views for the back and sides.";
+}
+const info = await (await fetch("/api/info")).json();
+shapeModel = info.trellis ? "trellis" : "hunyuan";
+syncModel();
+seg($("#topoSeg"), v => { topo = v; syncEngine(); });
+let engine = "quadwild";
+seg($("#engineSeg"), v => { engine = v; syncEngine(); });
+function syncEngine() {
+  const quads = topo === "quads";
+  $("#engineRow").hidden = !quads;
+  $("#hardRow").hidden = !quads || engine !== "quadwild";
+  $("#symRow").hidden = !quads || engine !== "quadriflow";
+  $("#engineNote").textContent = engine === "quadwild"
+    ? "Loops follow creases and features. Lands within ~10% of the face count."
+    : "An even grid over everything. Has a symmetry option.";
+}
+syncEngine();
 seg($("#outSeg"), v => { out = v; syncOpts(); });
 function syncOpts() {
   // Face count, topology and bake size only mean something when the retopo runs:
@@ -244,7 +283,7 @@ function syncOpts() {
   $("#polyRow").hidden = !(src === "photo" && out === "high");
   $("#outNote").textContent = out === "high"
     ? "The AI's textured model as it comes out -- for you to retopo."
-    : "Plus an automatic quad retopo (QuadriFlow): even grid, no artist edge loops.";
+    : "Plus an automatic quad retopo, with the high-poly's texture baked onto it.";
 }
 syncOpts();
 // Polygon slider: log scale, 10k .. 2M (Tripo's high-poly ceiling).
@@ -252,11 +291,13 @@ const PMIN = 10000, PMAX = 2000000;
 const toPolys = v => { const p = PMIN * Math.pow(PMAX / PMIN, v / 1000); return p < 100000 ? Math.round(p / 1000) * 1000 : Math.round(p / 10000) * 10000; };
 const toSlide = p => Math.round(1000 * Math.log(p / PMIN) / Math.log(PMAX / PMIN));
 const fmtP = p => p >= 1e6 ? (p / 1e6).toFixed(p % 1e6 ? 2 : 0).replace(/\.?0+$/, "") + "M" : Math.round(p / 1000) + "k";
-let polys = 100000;
+let polys = shapeModel === "trellis" ? 500000 : 100000;
 function setPolys(p) {
   polys = Math.max(PMIN, Math.min(PMAX, p));
   $("#polySlide").value = toSlide(polys); $("#polyVal").textContent = fmtP(polys);
-  $("#polyNote").textContent = polys <= 100000 ? "Painted directly by the AI."
+  $("#polyNote").textContent = shapeModel === "trellis" ? (polys > 1000000 ? "Texture baked at 4K above 1M. Capped at what the model makes."
+      : "TRELLIS.2 bakes its own texture at any count.")
+    : polys <= 100000 ? "Painted directly by the AI."
     : polys <= 500000 ? "Texture is baked onto the denser mesh. Adds a minute or two."
     : "Finer shape pass, then the texture is baked on (4K above 1M). Several minutes. Capped at what the AI actually makes.";
 }
@@ -273,10 +314,14 @@ $("#go").onclick = async () => {
   fd.append("faces", $("#faces").value);
   fd.append("tris", topo === "tris");
   fd.append("symmetry", $("#symmetry").checked);
+  fd.append("engine", engine);
+  fd.append("hard", $("#hard").checked);
   fd.append("tex", $("#tex").value);
   fd.append("turbo", $("#turbo").checked);
   fd.append("retopo", src === "photo" && out === "retopo");
   fd.append("polys", polys);
+  fd.append("model", shapeModel);
+  fd.append("res", $("#res").value);
   $("#go").disabled = true;
   const r = await fetch("/api/jobs", { method: "POST", body: fd });
   validate();

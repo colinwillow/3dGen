@@ -13,7 +13,7 @@ nvidia-smi || { echo "No GPU visible in WSL. Update the Windows NVIDIA driver an
 
 echo "== system packages =="
 sudo apt-get update -y
-sudo apt-get install -y build-essential git wget curl xz-utils \
+sudo apt-get install -y build-essential git wget curl xz-utils unzip \
   libgl1 libopengl0 libglib2.0-0 libxi6 libxrender1 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3
 
 echo "== conda =="
@@ -71,10 +71,30 @@ BPY_ENV="$HOME/miniforge3/envs/gen3d-bpy"
 "$BPY_ENV/bin/pip" install "bpy==4.2.0"
 "$BPY_ENV/bin/python" -c "import bpy; print('  bpy', bpy.app.version_string)"
 
+echo "== QuadWild (feature-aligned quad remesher) =="
+# The Bi-MDF build: no Gurobi licence needed, and the release binaries are static,
+# so there is nothing to compile.
+QW="$THIRD/quadwild"
+if [ ! -x "$QW/quad_from_patches" ]; then
+  wget -q --show-progress -O /tmp/qw.zip \
+    https://github.com/cgg-bern/quadwild-bimdf/releases/download/v0.0.2/linux-binaries.zip
+  rm -rf "$QW" && mkdir -p "$QW" && (cd "$QW" && unzip -q /tmp/qw.zip)
+  chmod +x "$QW/quadwild" "$QW/quad_from_patches"
+fi
+echo "  QuadWild in $QW"
+
+echo "== TRELLIS.2 (finer shapes) =="
+# Its own script and env. If its build fails, the rest still works (Hunyuan).
+bash "$ROOT/setup/install_trellis.sh" || echo "  !! TRELLIS.2 did not install -- Hunyuan still works. Re-run: bash setup/install_trellis.sh"
+conda activate gen3d
+
 # Activation hook so `conda activate gen3d` always sets these.
 mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
 cat > "$CONDA_PREFIX/etc/conda/activate.d/gen3d.sh" <<EOF
 export GEN3D_BPY="$BPY_ENV/bin/python"
+export GEN3D_QUADWILD="$QW"
+if [ -f "$THIRD/TRELLIS.2/.gen3d_ok" ]; then export GEN3D_TRELLIS="$HOME/miniforge3/envs/trellis2/bin/python"; fi
+export GEN3D_TRELLIS_DIR="$THIRD/TRELLIS.2"
 export CUDA_HOME="\$CONDA_PREFIX"
 export PYTHONPATH="$ROOT:\${PYTHONPATH:-}"
 EOF

@@ -38,6 +38,7 @@ def retopo(high, out, name, a, dense=None):
     cmd = blender_cmd() + [
            "--high", str(high), "--out", str(out), "--name", name, "--faces", str(a.faces),
            "--tex", str(a.tex), "--voxel", str(a.voxel)]
+    cmd += ["--engine", a.engine, "--sharp", str(a.sharp)]
     if a.tris:
         cmd.append("--tris")
     if a.symmetry:
@@ -53,13 +54,36 @@ def retopo(high, out, name, a, dense=None):
     return Path(out) / f"{name}.fbx"
 
 
+def trellis(image, out, a):
+    """TRELLIS.2 in its own env (see trellis_run.py). Returns its textured GLB."""
+    py = os.environ.get("GEN3D_TRELLIS")
+    if not py:
+        sys.exit("TRELLIS.2 isn't installed: re-run setup/install_wsl.sh (it sets GEN3D_TRELLIS)")
+    polys = a.polys or 1_000_000
+    tex = a.tex if polys <= 1_000_000 else max(a.tex, 4096)
+    cmd = [py, str(HERE / "trellis_run.py"), str(image), str(out), "--res", str(a.res),
+           "--polys", str(polys), "--tex", str(tex), "--seed", str(a.seed)]
+    env = dict(os.environ)
+    env.setdefault("ATTN_BACKEND", "xformers")  # what install_trellis.sh installs
+    if os.environ.get("GEN3D_TRELLIS_DIR"):
+        env["PYTHONPATH"] = os.environ["GEN3D_TRELLIS_DIR"]  # its own packages, not ours
+    print("[gen3d]", " ".join(cmd))
+    subprocess.run(cmd, check=True, env=env)
+    return Path(out) / "textured.glb"
+
+
 def mesh_opts(ap):
     ap.add_argument("--faces", type=int, default=5000, help="target face count (default 5000)")
     ap.add_argument("--tris", action="store_true", help="triangles instead of quads")
     ap.add_argument("--tex", type=int, default=2048, help="baked texture size")
     ap.add_argument("--voxel", type=float, default=0.006,
                     help="pre-remesh detail; smaller keeps thin parts, bigger is more robust")
-    ap.add_argument("--symmetry", action="store_true", help="mirror the quad flow across X")
+    ap.add_argument("--symmetry", action="store_true", help="mirror the quad flow across X (QuadriFlow only)")
+    ap.add_argument("--engine", choices=["quadwild", "quadriflow"], default="quadwild",
+                    help="quad remesher: quadwild follows creases and features (default), "
+                         "quadriflow lays an even grid")
+    ap.add_argument("--sharp", type=float, default=35,
+                    help="QuadWild: crease angle kept as a hard edge, degrees (-1 = organic, none)")
     ap.add_argument("--glb", action="store_true", help="also write a triangulated GLB")
     ap.add_argument("--name", help="output name (default: the input file's name)")
     ap.add_argument("--out", default="out", help="output root folder")
@@ -81,6 +105,10 @@ def main():
                    help="shape resolution 256-512 (default: 384, or 512 above 500k --polys)")
     m.add_argument("--paint-faces", type=int, default=100000,
                    help="the textured mesh is reduced to this many faces first (painting is slow)")
+    m.add_argument("--model", choices=["hunyuan", "trellis"], default="hunyuan",
+                   help="shape model: trellis = TRELLIS.2 (much finer detail), hunyuan = Hunyuan3D-2")
+    m.add_argument("--res", choices=["512", "1024", "1536"], default="1536",
+                   help="TRELLIS.2 shape resolution (1536 = most detail, ~2-4 min on a 3090)")
     m.add_argument("--retopo", action="store_true",
                    help="also run the automatic quad retopo (off: you get the high-poly)")
     mesh_opts(m)
@@ -101,7 +129,18 @@ def main():
     out = Path(a.out) / name
     out.mkdir(parents=True, exist_ok=True)
 
-    if a.cmd == "make":
+    if a.cmd == "make" and a.model == "trellis":
+        for v in ("left", "back", "right"):
+            if getattr(a, v):
+                print(f"[gen3d] note: TRELLIS.2 takes one image; --{v} is ignored")
+        high = trellis(a.image, out / "high", a)
+        if a.retopo:
+            fbx = retopo(high, out, name, a)
+        else:
+            a.clean = True
+            fbx = retopo(high, out, name, a)
+            shutil.copy(high, out / f"{name}.glb")
+    elif a.cmd == "make":
         from gen3d.shape import generate
         high, dense = generate(a.image, out / "high", left=a.left, back=a.back, right=a.right,
                                texture=not a.no_texture, seed=a.seed, octree=a.octree,

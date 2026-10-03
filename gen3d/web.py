@@ -29,8 +29,11 @@ MESH = {".glb", ".gltf", ".fbx", ".obj"}
 # Log line -> the stage it starts. Matched in order, last match wins.
 STAGES = [
     (r"\[shape\] tencent", "shape"),
+    (r"\[trellis\] loading", "shape"),
+    (r"\[trellis\] \d+ faces raw", "texture"),
     (r"\[shape\] \d+ faces", "texture"),
     (r"\[retopo\] high:", "quads"),
+    (r"\[retopo\] QuadWild", "quads"),
     (r"\[retopo\] clean:", "export"),
     (r"\[retopo\] transfer:", "bake"),
     (r"\[retopo\] baking on", "bake"),
@@ -126,6 +129,12 @@ def index():
     return (Path(__file__).parent / "web" / "index.html").read_text()
 
 
+@app.get("/api/info")
+def info():
+    py = os.environ.get("GEN3D_TRELLIS")
+    return {"trellis": bool(py and Path(py).exists())}
+
+
 @app.get("/api/jobs")
 def list_jobs():
     ms = [load(p.parent.name) for p in JOBS.glob("*/job.json")]
@@ -159,7 +168,9 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
                      faces: int = Form(5000), tris: bool = Form(False),
                      symmetry: bool = Form(False), tex: int = Form(2048),
                      turbo: bool = Form(False), texture: bool = Form(True),
-                     retopo: bool = Form(False), polys: int = Form(100000)):
+                     retopo: bool = Form(False), polys: int = Form(100000),
+                     engine: str = Form("quadwild"), hard: bool = Form(True),
+                     model: str = Form("hunyuan"), res: str = Form("1536")):
     src = mesh if mesh and mesh.filename else front
     if not src or not src.filename:
         raise HTTPException(400, "upload a photo (or a mesh)")
@@ -182,7 +193,9 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
     polys = max(10000, min(2000000, polys))
     tex = tex if tex in (512, 1024, 2048, 4096) else 2048
     opts = ["--faces", str(faces), "--tex", str(tex), "--name", jid, "--out", str(JOBS)]
+    engine = engine if engine in ("quadwild", "quadriflow") else "quadwild"
     opts += ["--tris"] * tris + ["--symmetry"] * symmetry
+    opts += ["--engine", engine, "--sharp", "35" if hard else "-1"]
     if mesh and mesh.filename:
         p = await keep(mesh, "mesh", MESH)
         mode, cmd = "retopo", [sys.executable, "-m", "gen3d", "retopo", str(p)] + opts
@@ -193,13 +206,15 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
             q = await keep(u, k, IMG)
             if q:
                 cmd += [f"--{k}", str(q)]
+        model = model if model in ("hunyuan", "trellis") else "hunyuan"
+        cmd += ["--model", model, "--res", res if res in ("512", "1024", "1536") else "1536"]
         cmd += ["--turbo"] * turbo + ["--no-texture"] * (not texture) + ["--retopo"] * retopo
         if not retopo:
             cmd += ["--polys", str(polys)]
         mode = "make" if retopo else "high"
     m = dict(id=jid, name=stem, mode=mode, status="queued", stage="queued", cmd=cmd,
              created=time.time(),
-             params=dict(faces=faces, polys=polys, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo,
+             params=dict(faces=faces, polys=polys, model=model, engine=engine, hard=hard, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo,
                          retopo=retopo or mode == "retopo"))
     save(m)
     work.put(jid)
