@@ -50,6 +50,12 @@ echo "== Hunyuan3D-2 =="
 cd "$THIRD/Hunyuan3D-2"
 pip install -r requirements.txt
 pip install -e .
+# Hunyuan3D-2 was written against transformers 4.x. transformers 5 renamed the
+# DINOv2 SwiGLU layers (mlp.weights_in/out), so the image encoder's checkpoint no
+# longer loads -- a wall of "main_image_encoder... weights" keys at the shape step.
+# transformers 4.x needs huggingface-hub < 1.0, and recent diffusers needs >= 1.x,
+# so diffusers is held back with it.
+pip install "transformers>=4.48,<4.50" "diffusers>=0.32,<0.33" "huggingface-hub>=0.26,<1.0" "tokenizers<0.22"
 rm -rf hy3dgen/texgen/custom_rasterizer/build hy3dgen/texgen/differentiable_renderer/build
 ( cd hy3dgen/texgen/custom_rasterizer && python setup.py install )
 ( cd hy3dgen/texgen/differentiable_renderer && python setup.py install )
