@@ -105,44 +105,64 @@ def stats(obj):
     return f"{len(polys)} faces ({quads} quads, {tris} tris, {len(polys) - quads - tris} ngons)"
 
 
-def remesh(high, diag, a):
+def shell(high, diag, a, voxel):
+    """A copy of the high-poly that QuadriFlow will accept: closed and manifold."""
     low = high.copy()
     low.data = high.data.copy()
     low.name = a.name
     bpy.context.collection.objects.link(low)
     only(low)
     low.data.materials.clear()
-
-    # Generated meshes are rarely manifold, and QuadriFlow refuses anything that
-    # isn't. A fine voxel remesh first makes it a clean closed shell.
-    if a.voxel > 0:
-        m = low.modifiers.new("vox", "REMESH")
-        m.mode = "VOXEL"
-        m.voxel_size = diag * a.voxel
-        bpy.ops.object.modifier_apply(modifier=m.name)
-        log("voxel shell:", stats(low))
-    # QuadriFlow also wants consistently wound normals, and says so only as a
-    # warning while still reporting FINISHED -- hence the count check below.
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
+    if voxel > 0:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        # Generated meshes are rarely manifold. A voxel remesh rebuilds the surface
+        # as one closed shell; QuadriFlow can still refuse it, which is what the
+        # coarser retries in remesh() are for.
+        m = low.modifiers.new("vox", "REMESH")
+        m.mode = "VOXEL"
+        m.voxel_size = diag * voxel
+        bpy.ops.object.modifier_apply(modifier=m.name)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        log(f"voxel shell ({voxel:g}):", stats(low))
+    # Measured: on a clean voxel shell this weld is what lets QuadriFlow accept it
+    # first time (without it the same blob needed 4 tries).
     bpy.ops.mesh.remove_doubles(threshold=diag * 1e-5)
+    bpy.ops.mesh.delete_loose()
+    bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
+    return low
 
+
+def remesh(high, diag, a):
     if a.tris:
+        low = shell(high, diag, a, a.voxel)
         m = low.modifiers.new("dec", "DECIMATE")
         m.ratio = min(1.0, a.faces / max(1, len(low.data.polygons)))
         bpy.ops.object.modifier_apply(modifier=m.name)
     else:
-        before = len(low.data.polygons)
-        bpy.ops.object.quadriflow_remesh(
-            mode="FACES", target_faces=a.faces, use_mesh_symmetry=a.symmetry,
-            use_preserve_sharp=False, use_preserve_boundary=False,
-            smooth_normals=False, seed=0)
-        got = len(low.data.polygons)
-        if got == before or got > a.faces * 2:
-            raise SystemExit(f"QuadriFlow did not remesh ({before} -> {got} faces). "
-                             "Try a bigger --voxel, or --tris")
+        # QuadriFlow refuses some shells (reporting it only as a warning). A coarser
+        # voxel is the reliable cure, so retry before giving up.
+        base = a.voxel if a.voxel > 0 else 0.006
+        tries = ([0] if a.voxel == 0 else []) + [base, base * 1.6, base * 2.5, base * 4]
+        for v in tries:
+            low = shell(high, diag, a, v)
+            before = len(low.data.polygons)
+            bpy.ops.object.quadriflow_remesh(
+                mode="FACES", target_faces=a.faces, use_mesh_symmetry=a.symmetry,
+                use_preserve_sharp=False, use_preserve_boundary=False,
+                smooth_normals=False, seed=0)
+            got = len(low.data.polygons)
+            if got != before and got <= a.faces * 2:
+                break
+            log(f"QuadriFlow refused this shell ({before} -> {got} faces); retrying coarser")
+            bpy.data.objects.remove(low, do_unlink=True)
+        else:
+            raise SystemExit("QuadriFlow could not remesh this model at any voxel size. "
+                             "Try --tris, or a cleaner input mesh.")
     bpy.ops.object.shade_smooth()
     log("low:", stats(low))
     return low
