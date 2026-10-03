@@ -74,7 +74,7 @@ python -m gen3d make front.png --left left.png --back back.png --faces 5000
 python -m gen3d retopo statue.glb --faces 5000 --symmetry
 ```
 
-Output goes to `out/<name>/`. Open it from Windows Explorer at `\\wsl$\Ubuntu-22.04\home\<you>\3dGen\out`,
+Output goes to `out/<name>/`. Open it from Windows Explorer at `\\wsl$\Ubuntu\home\<you>\3dGen\out`,
 or write straight to Windows with `--out /mnt/c/Users/<you>/Desktop/3dgen`.
 
 Useful knobs:
