@@ -33,20 +33,16 @@ pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorc
 export CUDA_HOME="$CONDA_PREFIX"
 export TORCH_CUDA_ARCH_LIST="8.6"   # RTX 3090
 
-echo "== host compiler for CUDA 12.4 (needs gcc <= 13) =="
-# New Ubuntu ships gcc 14/15, which nvcc 12.4 refuses outright. Use gcc 13 from
-# apt if this release has it, otherwise gcc 12 from conda-forge inside the env.
-SYS_GCC="$(gcc -dumpversion | cut -d. -f1)"
-if [ "$SYS_GCC" -le 13 ]; then
-  CCX=gcc; CXXX=g++
-elif sudo apt-get install -y gcc-13 g++-13 >/dev/null 2>&1; then
-  CCX=gcc-13; CXXX=g++-13
-else
-  conda install -y -c conda-forge "gcc_linux-64=12" "gxx_linux-64=12"
-  CCX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc"; CXXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++"
-fi
-export CC="$(command -v "$CCX")" CXX="$(command -v "$CXXX")"
-export NVCC_PREPEND_FLAGS="-ccbin $CXX"   # nvcc honours this whatever torch passes
+echo "== host compiler for CUDA 12.4 =="
+# Always conda-forge's gcc 12, never the system one. Two separate reasons, and new
+# Ubuntu hits both: nvcc 12.4 refuses gcc newer than 13, and glibc 2.41+ declares
+# cospi/sinpi/rsqrt in <math.h>, which collide with CUDA 12.4's own declarations.
+# The conda compiler carries its own older sysroot, so the system headers are never
+# read at all.
+conda install -y -c conda-forge "gcc_linux-64=12" "gxx_linux-64=12"
+export CC="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc"
+export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++"
+unset NVCC_PREPEND_FLAGS   # torch already passes -ccbin "$CC"
 echo "  using $("$CXX" --version | head -1)"
 
 echo "== Hunyuan3D-2 =="
@@ -54,6 +50,7 @@ echo "== Hunyuan3D-2 =="
 cd "$THIRD/Hunyuan3D-2"
 pip install -r requirements.txt
 pip install -e .
+rm -rf hy3dgen/texgen/custom_rasterizer/build hy3dgen/texgen/differentiable_renderer/build
 ( cd hy3dgen/texgen/custom_rasterizer && python setup.py install )
 ( cd hy3dgen/texgen/differentiable_renderer && python setup.py install )
 cd "$ROOT"
