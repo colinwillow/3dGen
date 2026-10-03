@@ -31,6 +31,7 @@ STAGES = [
     (r"\[shape\] tencent", "shape"),
     (r"\[shape\] \d+ faces", "texture"),
     (r"\[retopo\] high:", "quads"),
+    (r"\[retopo\] clean:", "export"),
     (r"\[retopo\] baking on", "bake"),
     (r"\[retopo\] wrote .*\.fbx", "export"),
     (r"\[gen3d\] done", "done"),
@@ -90,8 +91,8 @@ def worker():
 def files(jid):
     d = JOBS / jid
     out = {}
-    for name, key in ((f"{jid}.fbx", "fbx"), (f"{jid}.glb", "glb"), ("preview.glb", "preview"),
-                      ("wire.bin", "wire")):
+    for name, key in ((f"{jid}.fbx", "fbx"), (f"{jid}.glb", "glb"), (f"{jid}_highres.glb", "highres"),
+                      ("preview.glb", "preview"), ("wire.bin", "wire")):
         if (d / name).exists():
             out[key] = f"/files/{jid}/{name}"
     out["textures"] = [f"/files/{jid}/{p.name}" for p in sorted(d.glob("*.png"))]
@@ -156,7 +157,8 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
                      mesh: UploadFile = File(None),
                      faces: int = Form(5000), tris: bool = Form(False),
                      symmetry: bool = Form(False), tex: int = Form(2048),
-                     turbo: bool = Form(False), texture: bool = Form(True)):
+                     turbo: bool = Form(False), texture: bool = Form(True),
+                     retopo: bool = Form(False)):
     src = mesh if mesh and mesh.filename else front
     if not src or not src.filename:
         raise HTTPException(400, "upload a photo (or a mesh)")
@@ -189,11 +191,12 @@ async def create_job(front: UploadFile = File(None), left: UploadFile = File(Non
             q = await keep(u, k, IMG)
             if q:
                 cmd += [f"--{k}", str(q)]
-        cmd += ["--turbo"] * turbo + ["--no-texture"] * (not texture)
-        mode = "make"
+        cmd += ["--turbo"] * turbo + ["--no-texture"] * (not texture) + ["--retopo"] * retopo
+        mode = "make" if retopo else "high"
     m = dict(id=jid, name=stem, mode=mode, status="queued", stage="queued", cmd=cmd,
              created=time.time(),
-             params=dict(faces=faces, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo))
+             params=dict(faces=faces, tris=tris, symmetry=symmetry, tex=tex, turbo=turbo,
+                         retopo=retopo or mode == "retopo"))
     save(m)
     work.put(jid)
     return view(m)
@@ -206,8 +209,9 @@ def get_file(jid: str, path: str):
     if not re.fullmatch(r"[\w-]+", jid) or base not in f.parents or not f.is_file():
         raise HTTPException(404)
     name = f.name
-    if f.suffix in (".fbx", ".glb") and f.stem == jid:
-        name = (load(jid) or {}).get("name", jid) + f.suffix  # robot.fbx, not 20251003-...fbx
+    if f.suffix in (".fbx", ".glb") and f.stem.startswith(jid):
+        # robot.fbx / robot_highres.glb, not 20251003-...fbx
+        name = (load(jid) or {}).get("name", jid) + f.stem[len(jid):] + f.suffix
     return FileResponse(f, filename=name)
 
 

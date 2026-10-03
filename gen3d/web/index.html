@@ -117,6 +117,12 @@
           <div>Drop a high-poly mesh<br><span class="muted">glb, fbx, obj · its texture is baked onto the new mesh</span></div></div>
       </div>
 
+      <div id="outRow">
+        <label class="h">Output</label>
+        <div class="seg" id="outSeg"><button data-v="high" class="on">High-poly</button><button data-v="retopo">Quad retopo</button></div>
+        <div class="muted" id="outNote" style="margin-top:6px">The AI's textured model as it comes out -- for you to retopo.</div>
+      </div>
+      <div id="retopoOpts">
       <div>
         <label class="h">Face count</label>
         <div class="row"><input type="number" id="faces" value="5000" min="200" max="200000" step="100"></div>
@@ -133,6 +139,7 @@
       <div>
         <label class="h">Texture size</label>
         <select id="tex"><option>1024</option><option selected>2048</option><option>4096</option></select>
+      </div>
       </div>
       <label class="check" id="turboRow"><input type="checkbox" id="turbo"> Fast shape <small>quicker, a bit less detail</small></label>
 
@@ -178,7 +185,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const $ = s => document.querySelector(s);
 const files = {};          // front/left/back/right/mesh -> File
-let src = "photo", topo = "quads", current = null, shown = null, mode = "tex";
+let src = "photo", topo = "quads", out = "high", current = null, shown = null, mode = "tex";
 
 // ---------- upload form ----------
 for (const d of document.querySelectorAll(".drop")) {
@@ -214,9 +221,20 @@ function seg(el, cb) {
 }
 seg($("#srcSeg"), v => {
   src = v; $("#photoIn").hidden = v !== "photo"; $("#meshIn").hidden = v !== "mesh";
-  $("#turboRow").hidden = v !== "photo"; validate();
+  $("#turboRow").hidden = v !== "photo"; syncOpts(); validate();
 });
 seg($("#topoSeg"), v => topo = v);
+seg($("#outSeg"), v => { out = v; syncOpts(); });
+function syncOpts() {
+  // Face count, topology and bake size only mean something when the retopo runs:
+  // always for "Retopo a mesh", by choice for a photo.
+  $("#outRow").hidden = src !== "photo";
+  $("#retopoOpts").hidden = src === "photo" && out === "high";
+  $("#outNote").textContent = out === "high"
+    ? "The AI's textured model as it comes out -- for you to retopo."
+    : "Plus an automatic quad retopo (QuadriFlow): even grid, no artist edge loops.";
+}
+syncOpts();
 $("#faceChips").onclick = e => { const f = e.target.dataset.f; if (f) $("#faces").value = f; };
 function validate() { $("#go").disabled = !(src === "photo" ? files.front : files.mesh); }
 
@@ -229,6 +247,7 @@ $("#go").onclick = async () => {
   fd.append("symmetry", $("#symmetry").checked);
   fd.append("tex", $("#tex").value);
   fd.append("turbo", $("#turbo").checked);
+  fd.append("retopo", src === "photo" && out === "retopo");
   $("#go").disabled = true;
   const r = await fetch("/api/jobs", { method: "POST", body: fd });
   validate();
@@ -282,7 +301,7 @@ async function showModel(j) {
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()).length();
   const c = box.getCenter(new THREE.Vector3());
   controls.target.copy(c);
-  camera.position.copy(c).add(new THREE.Vector3(.55, .35, 1).normalize().multiplyScalar(size * 1.25));
+  camera.position.copy(c).add(new THREE.Vector3(.55, .35, 1).normalize().multiplyScalar(size * 1.7));
   camera.near = size / 200; camera.far = size * 50; camera.updateProjectionMatrix();
   grid.scale.setScalar(size / 4); grid.position.y = box.min.y;
   applyMode();
@@ -301,6 +320,7 @@ $("#modes").onclick = e => { const m = e.target.dataset.m; if (m) { mode = m; ap
 // ---------- jobs ----------
 const STEPS_MAKE = [["shape", "Shape"], ["texture", "Texture"], ["quads", "Quads"], ["bake", "Bake"], ["export", "Export"]];
 const STEPS_RETOPO = STEPS_MAKE.slice(2);
+const STEPS_HIGH = [["shape", "Shape"], ["texture", "Texture"], ["export", "Export"]];
 const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? "just now" : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t * 1000).toLocaleDateString(); };
 const mmss = s => `${s / 60 | 0}:${String(s % 60 | 0).padStart(2, "0")}`;
 
@@ -312,7 +332,7 @@ async function refresh() {
   for (const j of jobs) {
     const el = document.createElement("div");
     el.className = "job" + (j.id === current ? " sel" : "");
-    const st = j.status === "done" && j.stats ? `${j.stats.faces.toLocaleString()} ${j.params.tris ? "tris" : "quads"}`
+    const st = j.status === "done" && j.stats ? `${j.stats.faces.toLocaleString()} ${j.mode === "high" ? "faces" : j.params.tris ? "tris" : "quads"}`
       : j.status === "running" ? `working · ${j.stage}` : j.status;
     el.innerHTML = `<div class="t" style="${j.files.thumb ? `background-image:url('${j.files.thumb}')` : ""}">${j.files.thumb ? "" : "mesh"}</div>
       <div class="n"><b></b><i>${st} · ${ago(j.created)}</i></div><div class="dot ${j.status}"></div>`;
@@ -342,7 +362,7 @@ async function poll() {
   $("#prog").classList.toggle("on", busy || failed);
   $("#log").textContent = j.log;
   if (busy || failed) {
-    const steps = j.mode === "retopo" ? STEPS_RETOPO : STEPS_MAKE;
+    const steps = j.mode === "retopo" ? STEPS_RETOPO : j.mode === "high" ? STEPS_HIGH : STEPS_MAKE;
     const at = steps.findIndex(s => s[0] === j.stage);
     $("#steps").innerHTML = steps.map((s, i) =>
       `<div class="${i < at ? "done" : i === at && !failed ? "now" : ""}">${s[1]}</div>`).join("");
@@ -363,6 +383,7 @@ async function poll() {
     $("#statsTxt").textContent = s ? `${s.faces.toLocaleString()} faces · ${s.quads.toLocaleString()} quads · ${s.tris.toLocaleString()} tris` : "";
     const dl = [`<a class="btn primary" href="${j.files.fbx}" download>Download FBX</a>`];
     if (j.files.glb) dl.push(`<a class="btn" href="${j.files.glb}" download>GLB</a>`);
+    if (j.files.highres) dl.push(`<a class="btn" href="${j.files.highres}" download title="Full-resolution shape, untextured">Full-res GLB</a>`);
     for (const t of j.files.textures) dl.push(`<a class="btn" href="${t}" download>${t.split("_").pop().replace(".png", "")}</a>`);
     $("#dl").innerHTML = dl.join("");
     await showModel(j);

@@ -1,7 +1,7 @@
 # 3dGen
 
-Image → 3D mesh → **quad FBX with baked textures**, ready to open in Cinema 4D or Blender.
-Open models only, running on your own GPU.
+Image → **textured high-poly model** (FBX + GLB), ready to retopo in Cinema 4D or Blender.
+Open models only, running on your own GPU. An automatic quad retopo is there as an option.
 
 ```
 image ──Hunyuan3D-2──▶ textured high-poly ──Blender──▶ voxel shell ─▶ QuadriFlow quads
@@ -48,11 +48,13 @@ and that window is the app running; close it to stop the app. Your browser then 
 
 1. Drop in a photo, plus optional left/back/right views for a better back side. Or switch to
    **Retopo a mesh** and drop in a high-poly GLB/FBX/OBJ you already have.
-2. Set the face count and choose quads or triangles, and symmetry if you want it.
-3. Click **Generate** and watch the stages: Shape → Texture → Quads → Bake → Export.
+2. **Output: High-poly** (default) gives you the AI's textured model as-is. **Quad retopo**
+   adds an automatic QuadriFlow pass, which shows face count, topology and symmetry settings.
+3. Click **Generate** and watch the stages: Shape → Texture → Export (plus Quads → Bake for retopo).
 4. Spin the result around in the viewer. **Wireframe** shows the real quad edges, not the
-   triangulated preview. Then click **Download FBX** (and the texture maps if you want them
-   separately).
+   triangulated preview. Then click **Download FBX**. High-poly jobs also offer the textured
+   **GLB** and the **Full-res GLB**: the untextured shape at full density, which is finer than
+   the textured mesh because painting needs a reduced one (`--paint-faces`, default 100k).
 
 Every result stays in the History list (stored in `3dGen/jobs/`). Jobs run one at a time.
 If you queue several, they wait their turn, and they resume if you close the app halfway.
@@ -64,8 +66,11 @@ Open an Ubuntu terminal, then:
 ```bash
 conda activate gen3d && cd ~/3dGen
 
-# one image -> 5000 quads (your Windows files are under /mnt/c)
-python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png --faces 5000
+# one image -> textured high-poly FBX/GLB (your Windows files are under /mnt/c)
+python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png
+
+# ... plus an automatic quad retopo at ~5000 faces
+python -m gen3d make /mnt/c/Users/<you>/Pictures/robot.png --retopo --faces 5000
 
 # multi-view: better backs and sides
 python -m gen3d make front.png --left left.png --back back.png --faces 5000

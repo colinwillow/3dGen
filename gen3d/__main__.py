@@ -1,6 +1,7 @@
 """3dGen command line.
 
-    python -m gen3d make  photo.png --faces 5000            # image -> quad FBX
+    python -m gen3d make  photo.png                         # image -> textured high-poly FBX/GLB
+    python -m gen3d make  photo.png --retopo --faces 5000   # ... plus an automatic quad retopo
     python -m gen3d make  front.png --left l.png --back b.png
     python -m gen3d retopo some_highpoly.glb --faces 5000   # any mesh -> quad FBX
     python -m gen3d tripo photo.png --faces 5000            # same image through Tripo's API
@@ -66,13 +67,17 @@ def main():
     ap = argparse.ArgumentParser(prog="gen3d")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    m = sub.add_parser("make", help="image -> textured quad FBX (Hunyuan3D-2 + Blender)")
+    m = sub.add_parser("make", help="image -> textured high-poly FBX/GLB (Hunyuan3D-2)")
     m.add_argument("image", help="front view")
     m.add_argument("--left"), m.add_argument("--back"), m.add_argument("--right")
     m.add_argument("--no-texture", action="store_true")
     m.add_argument("--turbo", action="store_true", help="faster, slightly worse shape")
     m.add_argument("--seed", type=int, default=1234)
     m.add_argument("--octree", type=int, default=384, help="shape resolution (256-512)")
+    m.add_argument("--paint-faces", type=int, default=100000,
+                   help="the textured mesh is reduced to this many faces first (painting is slow)")
+    m.add_argument("--retopo", action="store_true",
+                   help="also run the automatic quad retopo (off: you get the high-poly)")
     mesh_opts(m)
 
     r = sub.add_parser("retopo", help="any high-poly mesh -> quad FBX with baked textures")
@@ -94,8 +99,19 @@ def main():
     if a.cmd == "make":
         from gen3d.shape import generate
         high = generate(a.image, out / "high", left=a.left, back=a.back, right=a.right,
-                        texture=not a.no_texture, seed=a.seed, octree=a.octree, turbo=a.turbo)
-        fbx = retopo(high, out, name, a)
+                        texture=not a.no_texture, seed=a.seed, octree=a.octree, turbo=a.turbo,
+                        paint_faces=a.paint_faces)
+        if a.retopo:
+            fbx = retopo(high, out, name, a)
+        else:
+            # The high-poly as the AI made it: grounded, centred, FBX with its texture,
+            # plus the GLBs untouched -- the textured one and the full-resolution shape
+            # (which is denser than the textured mesh, since painting needs it reduced).
+            a.clean = True
+            fbx = retopo(high, out, name, a)
+            shutil.copy(high, out / f"{name}.glb")
+            if (out / "high" / "shape.glb").exists() and high.name != "shape.glb":
+                shutil.copy(out / "high" / "shape.glb", out / f"{name}_highres.glb")
     elif a.cmd == "retopo":
         fbx = retopo(src, out, name, a)
     else:
